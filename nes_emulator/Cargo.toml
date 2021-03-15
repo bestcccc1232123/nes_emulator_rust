@@ -11,3 +11,4 @@ name = "nes_emulator_lib"
 path = "src/lib.rs"
 
 [dependencies]
+simple-error = "0.2"
