@@ -135,7 +135,8 @@ impl CPU {
     // Loads the program into PRG ROM.
     pub fn load(&mut self, program: &[u8]) -> Result<(), SimpleError> {
         self.mem.write_range(MEM_PRG_ROM_ADDR_START, program)?;
-        self.mem.write16(INIT_PROGRAM_COUNTER_ADDR, MEM_PRG_ROM_ADDR_START)
+        self.mem
+            .write16(INIT_PROGRAM_COUNTER_ADDR, MEM_PRG_ROM_ADDR_START)
     }
 
     // NES platform has a special mechanism to mark where the CPU should start the execution. Upon inserting a new cartridge, the CPU receives a special signal called "Reset interrupt" that instructs CPU to:
