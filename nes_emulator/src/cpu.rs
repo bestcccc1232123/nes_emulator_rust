@@ -34,7 +34,7 @@ const INIT_STATUS_REGISTER: u8 = 0b0001_0000;
 // NES platform has a special mechanism to mark where the CPU should start the execution.
 // Upon inserting a new cartridge, the CPU receives a special signal called "Reset interrupt"
 // that instructs CPU to set pc to 0xfffc.
-const INIT_PROGRAM_COUNTER: u16 = 0xfffc;
+const INIT_PROGRAM_COUNTER_ADDR: u16 = 0xfffc;
 
 // Memory layout.
 
@@ -134,7 +134,8 @@ impl CPU {
 
     // Loads the program into PRG ROM.
     pub fn load(&mut self, program: &[u8]) -> Result<(), SimpleError> {
-        self.mem.write_range(MEM_PRG_ROM_ADDR_START, program)
+        self.mem.write_range(MEM_PRG_ROM_ADDR_START, program)?;
+        self.mem.write16(INIT_PROGRAM_COUNTER_ADDR, MEM_PRG_ROM_ADDR_START)
     }
 
     // NES platform has a special mechanism to mark where the CPU should start the execution. Upon inserting a new cartridge, the CPU receives a special signal called "Reset interrupt" that instructs CPU to:
@@ -144,7 +145,7 @@ impl CPU {
         self.reg_a = 0;
         self.reg_x = 0;
         self.reg_status = INIT_STATUS_REGISTER;
-        self.pc = INIT_PROGRAM_COUNTER;
+        self.pc = self.mem.read16(INIT_PROGRAM_COUNTER_ADDR).unwrap();
     }
 
     // Runs the program started at PRG ROM.
@@ -257,25 +258,6 @@ impl CPU {
 mod test {
     use super::*;
 
-    // Returns a new program created from |program|. |program| is copied to the start of the new program.
-    // Additionally, bytecodes of "JMP #$8000" (3 bytes) are copied to position starting 0x7ffc.
-    // When the result program is copied by the testing CPU to program ROM starts at 0x8000 and when the
-    // program counter is set to 0xfffc, the cpu will jump to the beginning of program ROM and executes |program|.
-    // Note that |program| should still assume that the address starts at 0x8000.
-    fn create_simple_program(program: &[u8]) -> Vec<u8> {
-        let mut result: Vec<u8> = vec![0; 0x8000];
-
-        for i in 0..program.len() {
-            result[i] = program[i];
-        }
-
-        result[0x7ffc] = 0x4c; // JMP absolute.
-        result[0x7ffd] = 0x00; // 2 bytes for 0x8000.
-        result[0x7ffe] = 0x80;
-
-        result
-    }
-
     #[test]
     fn test_mem_init() {
         let mem = Mem::new();
@@ -370,13 +352,13 @@ mod test {
         assert_eq!(cpu.reg_a, 0);
         assert_eq!(cpu.reg_x, 0);
         assert_eq!(cpu.reg_status, 0b0001_0000);
-        assert_eq!(cpu.pc, 0xfffc);
+        assert_eq!(cpu.pc, 0x00);
     }
 
     #[test]
     fn test_lda_immediate_load_data() {
         let mut cpu = CPU::new();
-        let program = create_simple_program(&vec![0xa9, 0b0000_1111, 0x00]);
+        let program = vec![0xa9, 0b0000_1111, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -387,7 +369,7 @@ mod test {
     #[test]
     fn test_lda_immediate_negative_flag() {
         let mut cpu = CPU::new();
-        let program = create_simple_program(&vec![0xa9, 0b1000_1111, 0x00]);
+        let program = vec![0xa9, 0b1000_1111, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -398,7 +380,7 @@ mod test {
     #[test]
     fn test_lda_immediate_zero_flag() {
         let mut cpu = CPU::new();
-        let program = create_simple_program(&vec![0xa9, 0x00, 0x00]);
+        let program = vec![0xa9, 0x00, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -412,7 +394,7 @@ mod test {
         // LDA #$8f
         // TAX
         // BRK
-        let program = create_simple_program(&vec![0xa9, 0b0111_1111, 0xaa, 0x00]);
+        let program = vec![0xa9, 0b0111_1111, 0xaa, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -427,7 +409,7 @@ mod test {
         // LDA #$ff
         // TAX
         // BRK
-        let program = create_simple_program(&vec![0xa9, 0b1111_1111, 0xaa, 0x00]);
+        let program = vec![0xa9, 0b1111_1111, 0xaa, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -442,7 +424,7 @@ mod test {
         // LDA #$ff
         // TAX
         // BRK
-        let program = create_simple_program(&vec![0xa9, 0x00, 0xaa, 0x00]);
+        let program = vec![0xa9, 0x00, 0xaa, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -456,7 +438,7 @@ mod test {
         let mut cpu = CPU::new();
         // INX
         // INX
-        let program = create_simple_program(&vec![0xe8, 0xe8, 0x00]);
+        let program = vec![0xe8, 0xe8, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
@@ -467,15 +449,13 @@ mod test {
     #[test]
     fn test_inx_zero_flag() {
         let mut cpu = CPU::new();
-        let mut original_program = vec![0; 8000];
+        let mut program = vec![0; 8000];
         for i in 0..0x100 {
-            original_program[i] = 0xe8;
+            program[i] = 0xe8;
         }
 
         // INX * 256
         // BRK
-        let program = create_simple_program(&original_program);
-
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0x00);
@@ -485,14 +465,12 @@ mod test {
     #[test]
     fn test_inx_negative_flag() {
         let mut cpu = CPU::new();
-        let mut original_program = vec![0; 8000];
+        let mut program = vec![0; 8000];
         for i in 0..0xf0 {
-            original_program[i] = 0xe8;
+            program[i] = 0xe8;
         }
         // INX * 0xf0
         // BRK
-        let program = create_simple_program(&original_program);
-
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0xf0);
@@ -502,15 +480,13 @@ mod test {
     #[test]
     fn test_inx_overflow() {
         let mut cpu = CPU::new();
-        let mut original_program = vec![0; 8000];
+        let mut program = vec![0; 8000];
         for i in 0..0x101 {
-            original_program[i] = 0xe8;
+            program[i] = 0xe8;
         }
 
         // INX * 257
         // BRK
-        let program = create_simple_program(&original_program);
-
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 1)
