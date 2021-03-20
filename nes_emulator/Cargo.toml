@@ -12,3 +12,4 @@ path = "src/lib.rs"
 
 [dependencies]
 simple-error = "0.2"
+lazy_static = "1.4.0"

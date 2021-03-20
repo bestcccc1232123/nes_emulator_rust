@@ -3,17 +3,9 @@
  *
  * For 6502 instruction references, see http://www.obelisk.me.uk/6502/reference.html and http://www.6502.org/tutorials/6502opcodes.html
  */
-extern crate simple_error;
-
 use simple_error::SimpleError;
+use std::collections::HashMap;
 use std::result::Result;
-
-// OPCODEs.
-const OPCODE_BRK: u8 = 0x00;
-const OPCODE_INX: u8 = 0xe8;
-const OPCODE_JMP_ABSOLUTE: u8 = 0x4c;
-const OPCODE_LDA_IMMEDIATE: u8 = 0xa9;
-const OPCODE_TAX: u8 = 0xaa;
 
 // Status masks.
 // Note that we only have 7 status registers for 8 bits of "process status" register.
@@ -46,6 +38,81 @@ const MEM_PRG_ROM_ADDR_START: u16 = 0x8000;
 const MEM_PRG_ROM_ADDR_END: u16 = 0xffff;
 const MEM_PRG_ROM_SIZE: usize = (MEM_PRG_ROM_ADDR_END - MEM_PRG_ROM_ADDR_START) as usize + 1;
 
+const DEBUG_ADDR: u16 = 0xffff;
+
+// Represents a 6502 CPU opcodes.
+struct OpCode {
+    pub code: u8,
+    pub name: &'static str,
+    pub bytes: u8,
+    pub cycles: u8,
+    pub addressing_mode: AddressingMode,
+}
+
+impl OpCode {
+    fn new(
+        code: u8,
+        name: &'static str,
+        bytes: u8,
+        cycles: u8,
+        addressing_mode: AddressingMode,
+    ) -> Self {
+        OpCode {
+            code: code,
+            name: name,
+            bytes: bytes,
+            cycles: cycles,
+            addressing_mode: addressing_mode,
+        }
+    }
+}
+
+const OPCODE_BRK: u8 = 0x00;
+const OPCODE_LDA_IMMEDIATE: u8 = 0xa9;
+const OPCODE_LDA_ZEROPAGE: u8 = 0xa5;
+const OPCODE_LDA_ZEROPAGEX: u8 = 0xb5;
+const OPCODE_LDA_ABSOLUTE: u8 = 0xad;
+const OPCODE_LDA_ABSOLUTEX: u8 = 0xbd;
+const OPCODE_LDA_ABSOLUTEY: u8 = 0xb9;
+const OPCODE_LDA_INDIRECTX: u8 = 0xa1;
+const OPCODE_LDA_INDIRECTY: u8 = 0xb1;
+const OPCODE_JMP_ABSOLUTE: u8 = 0x4c;
+const OPCODE_JMP_INDIRECT: u8 = 0x6c;
+const OPCODE_INX: u8 = 0xe8;
+const OPCODE_TAX: u8 = 0xaa;
+
+lazy_static! {
+    // Hardcoded 6502 instructions.
+    static ref OPCODES : Vec<OpCode> = vec![
+        OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
+
+        OpCode::new(OPCODE_JMP_ABSOLUTE, "JMP", 3, 3, AddressingMode::Absolute),
+
+        OpCode::new(OPCODE_LDA_IMMEDIATE, "LDA", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_LDA_ZEROPAGE, "LDA", 2, 2, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_LDA_ZEROPAGEX, "LDA", 2, 2, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_LDA_ABSOLUTE, "LDA", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_LDA_ABSOLUTEX, "LDA", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_LDA_ABSOLUTEY, "LDA", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_LDA_INDIRECTX, "LDA", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_LDA_INDIRECTY, "LDA", 2, 5, AddressingMode::IndirectY),
+
+        OpCode::new(OPCODE_INX, "INX", 1, 2, AddressingMode::NoneAddressing),
+
+        OpCode::new(OPCODE_TAX, "TAX", 1, 1, AddressingMode::NoneAddressing),
+    ];
+    static ref OPCODE_MAP: HashMap<u8, &'static OpCode> = {
+        let mut map: HashMap<u8, &'static OpCode> = HashMap::new();
+        for opcode in &*OPCODES {
+            map.insert(opcode.code, opcode);
+        }
+        map
+    };
+}
+
 // Represents the memory of 6502.
 struct Mem {
     // The maximum addressable memory is 64KB.
@@ -76,6 +143,7 @@ impl Mem {
 
         Ok((hi << 8) | lo)
     }
+
     pub fn write(&mut self, addr: u16, val: u8) {
         self.data[addr as usize] = val;
     }
@@ -126,6 +194,33 @@ enum AddressingMode {
     IndirectX,
     IndirectY,
     NoneAddressing,
+}
+
+type InstructionHandler = fn(&mut CPU, u16);
+
+lazy_static! {
+    static ref INSTRUCTION_HANDLERS: HashMap<u8, InstructionHandler> = {
+        let mut map: HashMap<u8, InstructionHandler> = HashMap::new();
+
+        map.insert(OPCODE_BRK, CPU::brk);
+
+        map.insert(OPCODE_LDA_IMMEDIATE, CPU::lda);
+        map.insert(OPCODE_LDA_ZEROPAGE, CPU::lda);
+        map.insert(OPCODE_LDA_ZEROPAGEX, CPU::lda);
+        map.insert(OPCODE_LDA_ABSOLUTE, CPU::lda);
+        map.insert(OPCODE_LDA_ABSOLUTEX, CPU::lda);
+        map.insert(OPCODE_LDA_ABSOLUTEY, CPU::lda);
+        map.insert(OPCODE_LDA_INDIRECTX, CPU::lda);
+        map.insert(OPCODE_LDA_INDIRECTY, CPU::lda);
+
+        map.insert(OPCODE_JMP_ABSOLUTE, CPU::jmp);
+
+        map.insert(OPCODE_INX, CPU::inx);
+
+        map.insert(OPCODE_TAX, CPU::tax);
+
+        map
+    };
 }
 
 pub struct CPU {
@@ -180,28 +275,13 @@ impl CPU {
 
     // Executes the next instruction, return true to continue.
     pub fn step(&mut self) -> bool {
-        let op_code = self.read_mem_and_inc_pc();
-        match op_code {
-            OPCODE_BRK => {
-                return false;
+        let val = self.read_mem(self.pc);
+        match OPCODE_MAP.get(&val) {
+            Some(opcode) => return self.dispatch_instruction(opcode),
+            None => {
+                panic!(todo!("opcode not yet implemented"));
             }
-            OPCODE_INX => {
-                self.inx();
-            }
-            OPCODE_JMP_ABSOLUTE => {
-                let addr = self.read_operand_address(AddressingMode::Absolute);
-                self.jmp(addr);
-            }
-            OPCODE_LDA_IMMEDIATE => {
-                let addr = self.read_operand_address(AddressingMode::Immediate);
-                self.lda(addr);
-            }
-            OPCODE_TAX => {
-                self.tax();
-            }
-            _ => panic!(todo!("")),
         }
-        true
     }
 
     pub fn interpret(&mut self, program: &[u8]) -> Result<(), SimpleError> {
@@ -212,43 +292,58 @@ impl CPU {
         Ok(())
     }
 
-    fn read_operand_address(&mut self, addr_mode: AddressingMode) -> u16 {
+    fn dispatch_instruction(&mut self, opcode: &OpCode) -> bool {
+        let curr_pc = self.pc;
+        let handler = INSTRUCTION_HANDLERS.get(&opcode.code).unwrap();
+        let addr = self.read_operand_address(self.pc.wrapping_add(1), &opcode.addressing_mode);
+        handler(self, addr);
+
+        // Advance program counters if no jump happens.
+        if curr_pc == self.pc {
+            self.pc = self.pc.wrapping_add(opcode.bytes as u16);
+        }
+
+        if opcode.code == OPCODE_BRK {
+            false // stop
+        } else {
+            true // continue
+        }
+    }
+
+    fn read_operand_address(&self, addr: u16, addr_mode: &AddressingMode) -> u16 {
         match addr_mode {
-            AddressingMode::Immediate => {
-                let pc = self.pc;
-                self.pc = self.pc.wrapping_add(1);
-                pc
-            }
+            AddressingMode::Immediate => addr,
 
-            AddressingMode::ZeroPage => self.read_mem_and_inc_pc() as u16,
+            AddressingMode::ZeroPage => self.read_mem(addr) as u16,
 
-            AddressingMode::ZeroPageX => self.read_mem_and_inc_pc().wrapping_add(self.reg_x) as u16,
-            
-            AddressingMode::ZeroPageY => self.read_mem_and_inc_pc().wrapping_add(self.reg_y) as u16,
-            
-            AddressingMode::Absolute => self.read_mem16_and_inc_pc(),
+            AddressingMode::ZeroPageX => self.read_mem(addr).wrapping_add(self.reg_x) as u16,
 
-            AddressingMode::AbsoluteX => self.read_mem16_and_inc_pc().wrapping_add(self.reg_x as u16),
+            AddressingMode::ZeroPageY => self.read_mem(addr).wrapping_add(self.reg_y) as u16,
 
-            AddressingMode::AbsoluteY => self.read_mem16_and_inc_pc().wrapping_add(self.reg_y as u16),
+            AddressingMode::Absolute => self.read_mem16(addr),
+
+            AddressingMode::AbsoluteX => self.read_mem16(addr).wrapping_add(self.reg_x as u16),
+
+            AddressingMode::AbsoluteY => self.read_mem16(addr).wrapping_add(self.reg_y as u16),
 
             AddressingMode::Indirect => {
-                let addr_of_addr = self.read_mem16_and_inc_pc();
+                let addr_of_addr = self.read_mem16(addr);
                 self.read_mem16(addr_of_addr)
             }
 
             AddressingMode::IndirectX => {
-                let addr = self.read_mem_and_inc_pc().wrapping_add(self.reg_x) as u16;
+                let addr = self.read_mem(addr).wrapping_add(self.reg_x) as u16;
                 self.read_mem16(addr)
             }
 
             AddressingMode::IndirectY => {
-                let addr = self.read_mem_and_inc_pc().wrapping_add(self.reg_y) as u16;
-                self.read_mem16(addr)
+                let addr = self.read_mem16(addr);
+                self.read_mem16(addr).wrapping_add(self.reg_y as u16)
             }
 
             AddressingMode::NoneAddressing => {
-                panic!("reading_operand_address must be called with AddressingMode other than NoneAddressing")
+                // This address returned should never be used.
+                DEBUG_ADDR
             }
         }
     }
@@ -273,19 +368,6 @@ impl CPU {
         self.mem.write_range(start_addr, val).unwrap()
     }
 
-    // Returns the program pointed by |pc| and increment |pc|.
-    fn read_mem_and_inc_pc(&mut self) -> u8 {
-        let opcode = self.read_mem(self.pc);
-        self.pc += 1;
-        opcode
-    }
-
-    fn read_mem16_and_inc_pc(&mut self) -> u16 {
-        let val = self.read_mem16(self.pc);
-        self.pc = self.pc.wrapping_add(2);
-        val
-    }
-
     // Sets the N bit of status register based on the value of |register|.
     fn set_negative_flag(&mut self, register: u8) {
         if register & 0b1000_0000 == 0 {
@@ -304,8 +386,11 @@ impl CPU {
         }
     }
 
+    // Handles instruction LDA.
+    fn brk(&mut self, _addr: u16) {}
+
     // Handles instruction INX.
-    fn inx(&mut self) {
+    fn inx(&mut self, _addr: u16) {
         let (val_x, _overflow) = self.reg_x.overflowing_add(1);
         self.reg_x = val_x;
 
@@ -326,7 +411,7 @@ impl CPU {
     }
 
     // Handles instruction TAX.
-    fn tax(&mut self) {
+    fn tax(&mut self, _addr: u16) {
         self.reg_x = self.reg_a;
 
         self.set_negative_flag(self.reg_x);
