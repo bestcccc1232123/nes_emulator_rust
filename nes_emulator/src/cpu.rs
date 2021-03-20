@@ -72,7 +72,7 @@ impl Mem {
         }
 
         let lo = self.read(addr) as u16;
-        let hi = self.read(addr + 1) as u16;
+        let hi = self.read(addr.wrapping_add(1)) as u16;
 
         Ok((hi << 8) | lo)
     }
@@ -92,7 +92,7 @@ impl Mem {
         self.write(addr, lo);
 
         let hi = (val >> 8) as u8;
-        self.write(addr + 1, hi);
+        self.write(addr.wrapping_add(1), hi);
 
         Ok(())
     }
@@ -113,9 +113,25 @@ impl Mem {
     }
 }
 
+#[derive(Debug)]
+enum AddressingMode {
+    Immediate,
+    ZeroPage,
+    ZeroPageX,
+    ZeroPageY,
+    Absolute,
+    AbsoluteX,
+    AbsoluteY,
+    Indirect,
+    IndirectX,
+    IndirectY,
+    NoneAddressing,
+}
+
 pub struct CPU {
     pub reg_a: u8,      // register A.
     pub reg_x: u8,      // register X.
+    pub reg_y: u8,      // register Y.
     pub reg_status: u8, // program status register.
     pub pc: u16,        // program counter.
     mem: Mem,           // Memory.
@@ -126,6 +142,7 @@ impl CPU {
         CPU {
             reg_a: 0,
             reg_x: 0,
+            reg_y: 0,
             reg_status: INIT_STATUS_REGISTER,
             pc: 0,
             mem: Mem::new(),
@@ -145,6 +162,7 @@ impl CPU {
     pub fn reset(&mut self) {
         self.reg_a = 0;
         self.reg_x = 0;
+        self.reg_y = 0;
         self.reg_status = INIT_STATUS_REGISTER;
         self.pc = self.mem.read16(INIT_PROGRAM_COUNTER_ADDR).unwrap();
     }
@@ -162,7 +180,7 @@ impl CPU {
 
     // Executes the next instruction, return true to continue.
     pub fn step(&mut self) -> bool {
-        let op_code = self.read_and_inc_pc();
+        let op_code = self.read_mem_and_inc_pc();
         match op_code {
             OPCODE_BRK => {
                 return false;
@@ -171,12 +189,12 @@ impl CPU {
                 self.inx();
             }
             OPCODE_JMP_ABSOLUTE => {
-                let val = self.read16_and_inc_pc();
-                self.jmp(val);
+                let addr = self.read_operand_address(AddressingMode::Absolute);
+                self.jmp(addr);
             }
             OPCODE_LDA_IMMEDIATE => {
-                let val = self.read_and_inc_pc();
-                self.lda(val);
+                let addr = self.read_operand_address(AddressingMode::Immediate);
+                self.lda(addr);
             }
             OPCODE_TAX => {
                 self.tax();
@@ -194,16 +212,77 @@ impl CPU {
         Ok(())
     }
 
+    fn read_operand_address(&mut self, addr_mode: AddressingMode) -> u16 {
+        match addr_mode {
+            AddressingMode::Immediate => {
+                let pc = self.pc;
+                self.pc = self.pc.wrapping_add(1);
+                pc
+            }
+
+            AddressingMode::ZeroPage => self.read_mem_and_inc_pc() as u16,
+
+            AddressingMode::ZeroPageX => self.read_mem_and_inc_pc().wrapping_add(self.reg_x) as u16,
+            
+            AddressingMode::ZeroPageY => self.read_mem_and_inc_pc().wrapping_add(self.reg_y) as u16,
+            
+            AddressingMode::Absolute => self.read_mem16_and_inc_pc(),
+
+            AddressingMode::AbsoluteX => self.read_mem16_and_inc_pc().wrapping_add(self.reg_x as u16),
+
+            AddressingMode::AbsoluteY => self.read_mem16_and_inc_pc().wrapping_add(self.reg_y as u16),
+
+            AddressingMode::Indirect => {
+                let addr_of_addr = self.read_mem16_and_inc_pc();
+                self.read_mem16(addr_of_addr)
+            }
+
+            AddressingMode::IndirectX => {
+                let addr = self.read_mem_and_inc_pc().wrapping_add(self.reg_x) as u16;
+                self.read_mem16(addr)
+            }
+
+            AddressingMode::IndirectY => {
+                let addr = self.read_mem_and_inc_pc().wrapping_add(self.reg_y) as u16;
+                self.read_mem16(addr)
+            }
+
+            AddressingMode::NoneAddressing => {
+                panic!("reading_operand_address must be called with AddressingMode other than NoneAddressing")
+            }
+        }
+    }
+
+    fn read_mem(&self, addr: u16) -> u8 {
+        self.mem.read(addr)
+    }
+
+    fn read_mem16(&self, addr: u16) -> u16 {
+        self.mem.read16(addr).unwrap()
+    }
+
+    fn write_mem(&mut self, addr: u16, val: u8) {
+        self.mem.write(addr, val)
+    }
+
+    fn write_mem16(&mut self, addr: u16, val: u16) {
+        self.mem.write16(addr, val).unwrap()
+    }
+
+    fn write_range(&mut self, start_addr: u16, val: &[u8]) {
+        self.mem.write_range(start_addr, val).unwrap()
+    }
+
     // Returns the program pointed by |pc| and increment |pc|.
-    fn read_and_inc_pc(&mut self) -> u8 {
-        let opcode = self.mem.read(self.pc);
+    fn read_mem_and_inc_pc(&mut self) -> u8 {
+        let opcode = self.read_mem(self.pc);
         self.pc += 1;
         opcode
     }
 
-    fn read16_and_inc_pc(&mut self) -> u16 {
-        let val = self.mem.read16(self.pc).unwrap();
-        self.pc += 2;
+    fn read_mem16_and_inc_pc(&mut self) -> u16 {
+        let val = self.read_mem16(self.pc);
+        self.pc = self.pc.wrapping_add(2);
         val
     }
 
@@ -227,7 +306,7 @@ impl CPU {
 
     // Handles instruction INX.
     fn inx(&mut self) {
-        let (val_x, overflow) = self.reg_x.overflowing_add(1);
+        let (val_x, _overflow) = self.reg_x.overflowing_add(1);
         self.reg_x = val_x;
 
         self.set_negative_flag(self.reg_x);
@@ -239,8 +318,8 @@ impl CPU {
     }
 
     // Handles instruction LDA.
-    fn lda(&mut self, val: u8) {
-        self.reg_a = val;
+    fn lda(&mut self, addr: u16) {
+        self.reg_a = self.read_mem(addr);
 
         self.set_negative_flag(self.reg_a);
         self.set_zero_flag(self.reg_a);
@@ -289,7 +368,7 @@ mod test {
 
     #[test]
     fn test_mem_read16_out_of_range() {
-        let mut mem = Mem::new();
+        let mem = Mem::new();
 
         assert_eq!(
             mem.read16(0xffff),
@@ -352,6 +431,7 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0);
         assert_eq!(cpu.reg_x, 0);
+        assert_eq!(cpu.reg_y, 0);
         assert_eq!(cpu.reg_status, 0b0001_0000);
         assert_eq!(cpu.pc, 0x00);
     }
