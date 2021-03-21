@@ -107,6 +107,15 @@ const OPCODE_INX: u8 = 0xe8;
 // TAX
 const OPCODE_TAX: u8 = 0xaa;
 
+// TAY
+const OPCODE_TAY: u8 = 0xa8;
+
+// TXA
+const OPCODE_TXA: u8 = 0x8a;
+
+// TYA
+const OPCODE_TYA: u8 = 0x98;
+
 lazy_static! {
     // Hardcoded 6502 instructions.
     static ref OPCODES : Vec<OpCode> = vec![
@@ -169,7 +178,16 @@ lazy_static! {
         OpCode::new(OPCODE_INX, "INX", 1, 2, AddressingMode::NoneAddressing),
 
         // TAX
-        OpCode::new(OPCODE_TAX, "TAX", 1, 1, AddressingMode::NoneAddressing),
+        OpCode::new(OPCODE_TAX, "TAX", 1, 2, AddressingMode::NoneAddressing),
+
+        // TAY
+        OpCode::new(OPCODE_TAY, "TAY", 1, 2, AddressingMode::NoneAddressing),
+
+        // TXA
+        OpCode::new(OPCODE_TXA, "TXA", 1, 2, AddressingMode::NoneAddressing),
+
+        // TYA
+        OpCode::new(OPCODE_TYA, "TYA", 1, 2, AddressingMode::NoneAddressing),
     ];
 
     static ref OPCODE_MAP: HashMap<u8, &'static OpCode> = {
@@ -316,6 +334,12 @@ lazy_static! {
 
         map.insert(OPCODE_TAX, CPU::tax);
 
+        map.insert(OPCODE_TAY, CPU::tay);
+
+        map.insert(OPCODE_TXA, CPU::txa);
+
+        map.insert(OPCODE_TYA, CPU::tya);
+        
         map
     };
 }
@@ -547,12 +571,32 @@ impl CPU {
         self.write_mem(addr, self.reg_y);
     }
 
-    // Handles instruction TAX.
     fn tax(&mut self, _addr: u16) {
         self.reg_x = self.reg_a;
 
         self.set_negative_flag(self.reg_x);
         self.set_zero_flag(self.reg_x);
+    }
+
+    fn tay(&mut self, _addr: u16) {
+        self.reg_y = self.reg_a;
+
+        self.set_negative_flag(self.reg_y);
+        self.set_zero_flag(self.reg_y);
+    }
+
+    fn txa(&mut self, _addr: u16) {
+        self.reg_a = self.reg_x;
+
+        self.set_negative_flag(self.reg_a);
+        self.set_zero_flag(self.reg_a);
+    }
+
+    fn tya(&mut self, _addr: u16) {
+        self.reg_a = self.reg_y;
+
+        self.set_negative_flag(self.reg_a);
+        self.set_zero_flag(self.reg_a);
     }
 }
 
@@ -799,6 +843,141 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0x00);
         assert_eq!(cpu.reg_x, 0x00);
+        assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_tay_load_data() {
+        let mut cpu = CPU::new();
+        // LDA #$8f
+        // TAY
+        // BRK
+        let program = vec![0xa9, 0b0111_1111, 0xa8, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b0111_1111);
+        assert_eq!(cpu.reg_y, 0b0111_1111);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_tay_negative_flag() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // TAX
+        // BRK
+        let program = vec![0xa9, 0b1111_1111, 0xa8, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b1111_1111);
+        assert_eq!(cpu.reg_y, 0b1111_1111);
+        assert_eq!(cpu.reg_status, Status::N);
+    }
+
+    #[test]
+    fn test_tay_zero_flag() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // TAX
+        // BRK
+        let program = vec![0xa9, 0x00, 0xa8, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_y, 0x00);
+        assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_txa_load_data() {
+        let mut cpu = CPU::new();
+        // LDX #$7f
+        // TXA
+        // BRK
+        let program = vec![0xa2, 0b0111_1111, 0x8a, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b0111_1111);
+        assert_eq!(cpu.reg_x, 0b0111_1111);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_txa_negative_flag() {
+        let mut cpu = CPU::new();
+        // LDX #$ff
+        // TAX
+        // BRK
+        let program = vec![0xa2, 0b1111_1111, 0x8a, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b1111_1111);
+        assert_eq!(cpu.reg_x, 0b1111_1111);
+        assert_eq!(cpu.reg_status, Status::N);
+    }
+
+    #[test]
+    fn test_txa_zero_flag() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // TAX
+        // BRK
+        let program = vec![0xa2, 0x00, 0x8a, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_x, 0x00);
+        assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_tya_load_data() {
+        let mut cpu = CPU::new();
+        // LDY #$7f
+        // TYA
+        // BRK
+        let program = vec![0xa0, 0b0111_1111, 0x98, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b0111_1111);
+        assert_eq!(cpu.reg_y, 0b0111_1111);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_tya_negative_flag() {
+        let mut cpu = CPU::new();
+        // LDY #$ff
+        // TYA
+        // BRK
+        let program = vec![0xa0, 0b1111_1111, 0x98, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0b1111_1111);
+        assert_eq!(cpu.reg_y, 0b1111_1111);
+        assert_eq!(cpu.reg_status, Status::N);
+    }
+
+    #[test]
+    fn test_tya_zero_flag() {
+        let mut cpu = CPU::new();
+        // LDY #$ff
+        // TYA
+        // BRK
+        let program = vec![0xa0, 0x00, 0x98, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_y, 0x00);
         assert_eq!(cpu.reg_status, Status::Z);
     }
 
