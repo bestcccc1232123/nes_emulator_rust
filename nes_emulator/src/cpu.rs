@@ -87,6 +87,16 @@ const OPCODE_STA_ABSOLUTEY: u8 = 0x99;
 const OPCODE_STA_INDIRECTX: u8 = 0x81;
 const OPCODE_STA_INDIRECTY: u8 = 0x91;
 
+// STX
+const OPCODE_STX_ZEROPAGE: u8 = 0x86;
+const OPCODE_STX_ZEROPAGEY: u8 = 0x96;
+const OPCODE_STX_ABSOLUTE: u8 = 0x8e;
+
+// STY
+const OPCODE_STY_ZEROPAGE: u8 = 0x84;
+const OPCODE_STY_ZEROPAGEX: u8 = 0x94;
+const OPCODE_STY_ABSOLUTE: u8 = 0x8c;
+
 // JMP
 const OPCODE_JMP_ABSOLUTE: u8 = 0x4c;
 const OPCODE_JMP_INDIRECT: u8 = 0x6c;
@@ -144,6 +154,16 @@ lazy_static! {
         OpCode::new(OPCODE_STA_ABSOLUTEY, "STA", 3, 5, AddressingMode::AbsoluteY),
         OpCode::new(OPCODE_STA_INDIRECTX, "STA", 2, 6, AddressingMode::IndirectX),
         OpCode::new(OPCODE_STA_INDIRECTY, "STA", 2, 6, AddressingMode::IndirectY),
+
+        // STX
+        OpCode::new(OPCODE_STX_ZEROPAGE, "STX", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_STX_ZEROPAGEY, "STX", 2, 4, AddressingMode::ZeroPageY),
+        OpCode::new(OPCODE_STX_ABSOLUTE, "STX", 3, 4, AddressingMode::Absolute),
+
+        // STY
+        OpCode::new(OPCODE_STY_ZEROPAGE, "STY", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_STY_ZEROPAGEX, "STY", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_STY_ABSOLUTE, "STY", 3, 4, AddressingMode::Absolute),
 
         // INX
         OpCode::new(OPCODE_INX, "INX", 1, 2, AddressingMode::NoneAddressing),
@@ -281,6 +301,14 @@ lazy_static! {
         map.insert(OPCODE_STA_INDIRECTX, CPU::sta);
         map.insert(OPCODE_STA_INDIRECTY, CPU::sta);
 
+        map.insert(OPCODE_STX_ZEROPAGE, CPU::stx);
+        map.insert(OPCODE_STX_ZEROPAGEY, CPU::stx);
+        map.insert(OPCODE_STX_ABSOLUTE, CPU::stx);
+
+        map.insert(OPCODE_STY_ZEROPAGE, CPU::sty);
+        map.insert(OPCODE_STY_ZEROPAGEX, CPU::sty);
+        map.insert(OPCODE_STY_ABSOLUTE, CPU::sty);
+
         map.insert(OPCODE_JMP_ABSOLUTE, CPU::jmp);
         map.insert(OPCODE_JMP_INDIRECT, CPU::jmp);
 
@@ -365,7 +393,7 @@ impl CPU {
         match OPCODE_MAP.get(&val) {
             Some(opcode) => return self.dispatch_instruction(opcode),
             None => {
-                panic!(todo!("opcode not yet implemented"));
+                panic!(todo!("opcode 0x{:02x} not yet implemented", val));
             }
         }
     }
@@ -509,6 +537,14 @@ impl CPU {
 
     fn sta(&mut self, addr: u16) {
         self.write_mem(addr, self.reg_a);
+    }
+
+    fn stx(&mut self, addr: u16) {
+        self.write_mem(addr, self.reg_x);
+    }
+
+    fn sty(&mut self, addr: u16) {
+        self.write_mem(addr, self.reg_y);
     }
 
     // Handles instruction TAX.
@@ -874,6 +910,46 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0x1c);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_stx() {
+        let mut cpu = CPU::new();
+        // LDX #$a9
+        // STX $800a
+        // LDX #$1c
+        // STX $800b
+        // 0x00         <= 0x800a
+        // 0x00         <= 0x800b
+        // BRK
+        let program = vec![
+            0xa2, 0xa9, 0x8e, 0x0a, 0x80, 0xa2, 0x1c, 0x8e, 0x0b, 0x80, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x1c);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_sty() {
+        let mut cpu = CPU::new();
+        // LDY #$a9
+        // STY $800a
+        // LDY #$1c
+        // STY $800b
+        // 0x00         <= 0x800a
+        // 0x00         <= 0x800b
+        // BRK
+        let program = vec![
+            0xa0, 0xa9, 0x8c, 0x0a, 0x80, 0xa0, 0x1c, 0x8c, 0x0b, 0x80, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x1c);
         assert_eq!(cpu.reg_status, Status::empty());
     }
 }
