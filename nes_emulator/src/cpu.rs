@@ -6,23 +6,8 @@
 use simple_error::SimpleError;
 use std::collections::HashMap;
 use std::result::Result;
+use bitflags::bitflags;
 
-// Status masks.
-// Note that we only have 7 status registers for 8 bits of "process status" register.
-// Bit 5 is always set to 1. Since nothing can change it, it is of no use to programmers.
-//
-// See https://www.atarimagazines.com/compute/issue53/047_1_All_About_The_Status_Register.php
-const STATUS_MASK_CARRY_FLAG: u8 = 0b0000_0001; // C bit: bit 0
-const STATUS_MASK_ZERO_FLAG: u8 = 0b0000_0010; // Z bit: bit 1
-const STATUS_MASK_INTERRUPT_DISABLE: u8 = 0b0000_0100; // I bit: bit 2
-const STATUS_MASK_DECIMAL_MODE: u8 = 0b0000_1000; // D bit: bit 3
-const STATUS_MASK_BREAK_COMMAND: u8 = 0b0001_0000; // B bit: bit 4
-const STATUS_MASK_OVERFLOW_FLAG: u8 = 0b0100_0000; // V bit: bit 6
-const STATUS_MASK_NEGATIVE_FLAG: u8 = 0b1000_0000; // N bit: bit 7
-
-// Initial register values.
-// Bit 5 in the status register is always set to 1.
-const INIT_STATUS_REGISTER: u8 = 0b0001_0000;
 // NES platform has a special mechanism to mark where the CPU should start the execution.
 // Upon inserting a new cartridge, the CPU receives a special signal called "Reset interrupt"
 // that instructs CPU to set pc to 0xfffc.
@@ -223,11 +208,28 @@ lazy_static! {
     };
 }
 
+// Status register.
+// Note that we only have 7 status registers for 8 bits of "process status" register.
+// Bit 5 is always set to 1. Since nothing can change it, it is of no use to programmers.
+//
+// See https://www.atarimagazines.com/compute/issue53/047_1_All_About_The_Status_Register.php
+bitflags! {
+    pub struct Status : u8 {
+        const C = 0b0000_0001;   // C bit: bit 0
+        const Z = 0b0000_0010;   // Z bit: bit 1
+        const I = 0b0000_0100;   // I bit: bit 2
+        const D = 0b0000_1000;   // D bit: bit 3
+        const B = 0b0001_0000;   // B bit: bit 4
+        const V = 0b0100_0000;   // V bit: bit 6
+        const N = 0b1000_0000;   // N bit: bit 7
+    }
+}
+
 pub struct CPU {
     pub reg_a: u8,      // register A.
     pub reg_x: u8,      // register X.
     pub reg_y: u8,      // register Y.
-    pub reg_status: u8, // program status register.
+    pub reg_status: Status, // program status register.
     pub pc: u16,        // program counter.
     mem: Mem,           // Memory.
 }
@@ -238,7 +240,7 @@ impl CPU {
             reg_a: 0,
             reg_x: 0,
             reg_y: 0,
-            reg_status: INIT_STATUS_REGISTER,
+            reg_status: Status::empty(),
             pc: 0,
             mem: Mem::new(),
         }
@@ -258,7 +260,7 @@ impl CPU {
         self.reg_a = 0;
         self.reg_x = 0;
         self.reg_y = 0;
-        self.reg_status = INIT_STATUS_REGISTER;
+        self.reg_status = Status::empty();
         self.pc = self.mem.read16(INIT_PROGRAM_COUNTER_ADDR).unwrap();
     }
 
@@ -371,18 +373,18 @@ impl CPU {
     // Sets the N bit of status register based on the value of |register|.
     fn set_negative_flag(&mut self, register: u8) {
         if register & 0b1000_0000 == 0 {
-            self.reg_status &= !STATUS_MASK_NEGATIVE_FLAG;
+            self.reg_status.remove(Status::N);
         } else {
-            self.reg_status |= STATUS_MASK_NEGATIVE_FLAG;
+            self.reg_status.insert(Status::N);
         }
     }
 
     // Sets the Z bit of status register based on the value of |register|.
     fn set_zero_flag(&mut self, register: u8) {
         if register == 0 {
-            self.reg_status |= STATUS_MASK_ZERO_FLAG;
+            self.reg_status.insert(Status::Z);
         } else {
-            self.reg_status &= !STATUS_MASK_ZERO_FLAG;
+            self.reg_status.remove(Status::Z);
         }
     }
 
@@ -517,7 +519,7 @@ mod test {
         assert_eq!(cpu.reg_a, 0);
         assert_eq!(cpu.reg_x, 0);
         assert_eq!(cpu.reg_y, 0);
-        assert_eq!(cpu.reg_status, 0b0001_0000);
+        assert_eq!(cpu.reg_status, Status::empty());
         assert_eq!(cpu.pc, 0x00);
     }
 
@@ -529,7 +531,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_a, 0b0000_1111);
-        assert_eq!(cpu.reg_status, 0b0001_0000);
+        assert_eq!(cpu.reg_status, Status::empty());
     }
 
     #[test]
@@ -540,7 +542,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_a, 0b1000_1111);
-        assert_eq!(cpu.reg_status, 0b1001_0000);
+        assert_eq!(cpu.reg_status, Status::N);
     }
 
     #[test]
@@ -551,7 +553,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_a, 0x00);
-        assert_eq!(cpu.reg_status, 0b0001_0010);
+        assert_eq!(cpu.reg_status, Status::Z);
     }
 
     #[test]
@@ -566,7 +568,7 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0b0111_1111);
         assert_eq!(cpu.reg_x, 0b0111_1111);
-        assert_eq!(cpu.reg_status, 0b0001_0000);
+        assert_eq!(cpu.reg_status, Status::empty());
     }
 
     #[test]
@@ -581,7 +583,7 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0b1111_1111);
         assert_eq!(cpu.reg_x, 0b1111_1111);
-        assert_eq!(cpu.reg_status, 0b1001_0000);
+        assert_eq!(cpu.reg_status, Status::N);
     }
 
     #[test]
@@ -596,7 +598,7 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0x00);
         assert_eq!(cpu.reg_x, 0x00);
-        assert_eq!(cpu.reg_status, 0b0001_0010);
+        assert_eq!(cpu.reg_status, Status::Z);
     }
 
     #[test]
@@ -609,7 +611,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0x02);
-        assert_eq!(cpu.reg_status, 0b0001_0000);
+        assert_eq!(cpu.reg_status, Status::empty());
     }
 
     #[test]
@@ -625,7 +627,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0x00);
-        assert_eq!(cpu.reg_status, 0b0001_0010);
+        assert_eq!(cpu.reg_status, Status::Z);
     }
 
     #[test]
@@ -640,7 +642,7 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 0xf0);
-        assert_eq!(cpu.reg_status, 0b1001_0000);
+        assert_eq!(cpu.reg_status, Status::N);
     }
 
     #[test]
