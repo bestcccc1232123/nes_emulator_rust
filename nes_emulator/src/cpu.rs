@@ -96,6 +96,7 @@ lazy_static! {
 
         // JMP
         OpCode::new(OPCODE_JMP_ABSOLUTE, "JMP", 3, 3, AddressingMode::Absolute),
+        OpCode::new(OPCODE_JMP_INDIRECT, "JMP", 3, 5, AddressingMode::Indirect),
 
         // LDA
         OpCode::new(OPCODE_LDA_IMMEDIATE, "LDA", 2, 2, AddressingMode::Immediate),
@@ -255,6 +256,7 @@ lazy_static! {
         map.insert(OPCODE_LDY_ABSOLUTEX, CPU::ldy);
 
         map.insert(OPCODE_JMP_ABSOLUTE, CPU::jmp);
+        map.insert(OPCODE_JMP_INDIRECT, CPU::jmp);
 
         map.insert(OPCODE_INX, CPU::inx);
 
@@ -444,10 +446,8 @@ impl CPU {
         }
     }
 
-    // Handles instruction LDA.
     fn brk(&mut self, _addr: u16) {}
 
-    // Handles instruction INX.
     fn inx(&mut self, _addr: u16) {
         let (val_x, _overflow) = self.reg_x.overflowing_add(1);
         self.reg_x = val_x;
@@ -460,7 +460,6 @@ impl CPU {
         self.pc = addr;
     }
 
-    // Handles instruction LDA.
     fn lda(&mut self, addr: u16) {
         self.reg_a = self.read_mem(addr);
 
@@ -794,5 +793,37 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_x, 1)
+    }
+
+    #[test]
+    fn test_jmp_absolute() {
+        let mut cpu = CPU::new();
+        // JMP $8004  <= 0x8000
+        // BRK
+        // LDA #$01     <= 0x8004
+        // BRK
+        let program = vec![0x4c, 0x04, 0x80, 0x00, 0xa9, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x01);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_jmp_indirect() {
+        let mut cpu = CPU::new();
+        // JMP ($8007) <= 0x8000
+        // BRK           <= 0x8003
+        // LDA #$01      <= 0x8004
+        // BRK           <= 0x8006
+        // 0x04          <= 0x8007
+        // 0x08
+        let program = vec![0x6c, 0x07, 0x80, 0x00, 0xa9, 0x01, 0x00, 0x04, 0x80];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x01);
+        assert_eq!(cpu.reg_status, Status::empty());
     }
 }
