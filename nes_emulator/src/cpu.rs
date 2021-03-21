@@ -52,8 +52,19 @@ impl OpCode {
     }
 }
 
+// ADC
+const OPCODE_ADC_IMMEDIATE: u8 = 0x69;
+const OPCODE_ADC_ZEROPAGE: u8 = 0x65;
+const OPCODE_ADC_ZEROPAGEX: u8 = 0x75;
+const OPCODE_ADC_ABSOLUTE: u8 = 0x6d;
+const OPCODE_ADC_ABSOLUTEX: u8 = 0x7d;
+const OPCODE_ADC_ABSOLUTEY: u8 = 0x79;
+const OPCODE_ADC_INDIRECTX: u8 = 0x61;
+const OPCODE_ADC_INDIRECTY: u8 = 0x71;
+
 // BRK
 const OPCODE_BRK: u8 = 0x00;
+
 // LDA
 const OPCODE_LDA_IMMEDIATE: u8 = 0xa9;
 const OPCODE_LDA_ZEROPAGE: u8 = 0xa5;
@@ -116,9 +127,42 @@ const OPCODE_TXA: u8 = 0x8a;
 // TYA
 const OPCODE_TYA: u8 = 0x98;
 
+// SBC
+const OPCODE_SBC_IMMEDIATE: u8 = 0xe9;
+const OPCODE_SBC_ZEROPAGE: u8 = 0xe5;
+const OPCODE_SBC_ZEROPAGEX: u8 = 0xf5;
+const OPCODE_SBC_ABSOLUTE: u8 = 0xed;
+const OPCODE_SBC_ABSOLUTEX: u8 = 0xfd;
+const OPCODE_SBC_ABSOLUTEY: u8 = 0xf9;
+const OPCODE_SBC_INDIRECTX: u8 = 0xe1;
+const OPCODE_SBC_INDIRECTY: u8 = 0xf1;
+
+// SEC
+const OPCODE_SEC: u8 = 0x38;
+
+// SED
+const OPCODE_SED: u8 = 0xf8;
+
+// SEI
+const OPCODE_SEI: u8 = 0x78;
+
 lazy_static! {
     // Hardcoded 6502 instructions.
     static ref OPCODES : Vec<OpCode> = vec![
+
+        // ADC
+        OpCode::new(OPCODE_ADC_IMMEDIATE, "ADC", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_ADC_ZEROPAGE, "ADC", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_ADC_ZEROPAGEX, "ADC", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_ADC_ABSOLUTE, "ADC", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ADC_ABSOLUTEX, "ADC", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ADC_ABSOLUTEY, "ADC", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_ADC_INDIRECTX, "ADC", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ADC_INDIRECTY, "ADC", 2, 5, AddressingMode::IndirectY),
+
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
 
@@ -188,6 +232,28 @@ lazy_static! {
 
         // TYA
         OpCode::new(OPCODE_TYA, "TYA", 1, 2, AddressingMode::NoneAddressing),
+
+        // SBC
+        OpCode::new(OPCODE_SBC_IMMEDIATE, "SBC", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_SBC_ZEROPAGE, "SBC", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_SBC_ZEROPAGEX, "SBC", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_SBC_ABSOLUTE, "SBC", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_SBC_ABSOLUTEX, "SBC", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_SBC_ABSOLUTEY, "SBC", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_SBC_INDIRECTX, "SBC", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_SBC_INDIRECTY, "SBC", 2, 5, AddressingMode::IndirectY),
+
+        // SEC
+        OpCode::new(OPCODE_SEC, "SEC", 1, 2, AddressingMode::NoneAddressing),
+
+        // SED
+        OpCode::new(OPCODE_SED, "SED", 1, 2, AddressingMode::NoneAddressing),
+
+        // SEI
+        OpCode::new(OPCODE_SEI, "SEI", 1, 2, AddressingMode::NoneAddressing),
     ];
 
     static ref OPCODE_MAP: HashMap<u8, &'static OpCode> = {
@@ -288,6 +354,15 @@ lazy_static! {
     static ref INSTRUCTION_HANDLERS: HashMap<u8, InstructionHandler> = {
         let mut map: HashMap<u8, InstructionHandler> = HashMap::new();
 
+        map.insert(OPCODE_ADC_IMMEDIATE, CPU::adc);
+        map.insert(OPCODE_ADC_ZEROPAGE, CPU::adc);
+        map.insert(OPCODE_ADC_ZEROPAGEX, CPU::adc);
+        map.insert(OPCODE_ADC_ABSOLUTE, CPU::adc);
+        map.insert(OPCODE_ADC_ABSOLUTEX, CPU::adc);
+        map.insert(OPCODE_ADC_ABSOLUTEY, CPU::adc);
+        map.insert(OPCODE_ADC_INDIRECTX, CPU::adc);
+        map.insert(OPCODE_ADC_INDIRECTY, CPU::adc);
+
         map.insert(OPCODE_BRK, CPU::brk);
 
         map.insert(OPCODE_LDA_IMMEDIATE, CPU::lda);
@@ -339,7 +414,23 @@ lazy_static! {
         map.insert(OPCODE_TXA, CPU::txa);
 
         map.insert(OPCODE_TYA, CPU::tya);
-        
+
+        map.insert(OPCODE_SBC_IMMEDIATE, CPU::sbc);
+        map.insert(OPCODE_SBC_ZEROPAGE, CPU::sbc);
+        map.insert(OPCODE_SBC_ZEROPAGEX, CPU::sbc);
+        map.insert(OPCODE_SBC_ABSOLUTE, CPU::sbc);
+        map.insert(OPCODE_SBC_ABSOLUTE, CPU::sbc);
+        map.insert(OPCODE_SBC_ABSOLUTEX, CPU::sbc);
+        map.insert(OPCODE_SBC_ABSOLUTEY, CPU::sbc);
+        map.insert(OPCODE_SBC_INDIRECTX, CPU::sbc);
+        map.insert(OPCODE_SBC_INDIRECTY, CPU::sbc);
+
+        map.insert(OPCODE_SEC, CPU::sec);
+
+        map.insert(OPCODE_SED, CPU::sed);
+
+        map.insert(OPCODE_SEI, CPU::sei);
+
         map
     };
 }
@@ -524,6 +615,46 @@ impl CPU {
         }
     }
 
+    // Add |val| to register A and consider carrier bit C. Properly set other bits accordingly.
+    fn add_to_reg_a(&mut self, val: u8) {
+        let carrier: u8 = if self.reg_status.contains(Status::C) {
+            1
+        } else {
+            0
+        };
+
+        let signed_result: i16 =
+            i16::from(self.reg_a as i8) + i16::from(val as i8) + i16::from(carrier);
+        if signed_result > i16::from(i8::MAX) || signed_result < i16::from(i8::MIN) {
+            self.reg_status.insert(Status::V);
+        } else {
+            self.reg_status.remove(Status::V);
+        }
+
+        let unsigned_result: u16 = u16::from(self.reg_a) + u16::from(val) + u16::from(carrier);
+
+        if unsigned_result > u8::MAX as u16 {
+            self.reg_status.insert(Status::C);
+        } else {
+            self.reg_status.remove(Status::C);
+        }
+
+        self.set_reg_a(unsigned_result as u8);
+    }
+
+    fn set_reg_a(&mut self, val: u8) {
+        self.reg_a = val;
+
+        self.set_negative_flag(self.reg_a);
+        self.set_zero_flag(self.reg_a);
+    }
+
+    fn adc(&mut self, addr: u16) {
+        let val: u8 = self.read_mem(addr);
+
+        self.add_to_reg_a(val);
+    }
+
     fn brk(&mut self, _addr: u16) {}
 
     fn inx(&mut self, _addr: u16) {
@@ -597,6 +728,24 @@ impl CPU {
 
         self.set_negative_flag(self.reg_a);
         self.set_zero_flag(self.reg_a);
+    }
+
+    fn sbc(&mut self, addr: u16) {
+        let val = self.read_mem(addr);
+
+        self.add_to_reg_a(!val);
+    }
+
+    fn sec(&mut self, _addr: u16) {
+        self.reg_status.insert(Status::C);
+    }
+
+    fn sed(&mut self, _addr: u16) {
+        self.reg_status.insert(Status::D);
+    }
+
+    fn sei(&mut self, _addr: u16) {
+        self.reg_status.insert(Status::I);
     }
 }
 
@@ -1130,5 +1279,174 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0x1c);
         assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_sec() {
+        let mut cpu = CPU::new();
+        // SEI
+        // BRK
+        let program = vec![0x78, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_status.contains(Status::I), true);
+    }
+
+    #[test]
+    fn test_sed() {
+        let mut cpu = CPU::new();
+        // SED
+        // BRK
+        let program = vec![0xf8, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_status.contains(Status::D), true);
+    }
+
+    #[test]
+    fn test_sei() {
+        let mut cpu = CPU::new();
+        // SEC
+        // BRK
+        let program = vec![0x38, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+    }
+
+    #[test]
+    fn test_adc() {
+        let mut cpu = CPU::new();
+        // LDA #$01
+        // ADC #$01
+        // BRK
+        let program = vec![0xa9, 0x01, 0x69, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x02);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_adc_input_carrier() {
+        let mut cpu = CPU::new();
+        // SEC
+        // LDA #$01
+        // ADC #$01
+        // BRK
+        let program = vec![0x38, 0xa9, 0x01, 0x69, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x03);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_adc_output_add_two_positives() {
+        let mut cpu = CPU::new();
+        // LDA #$40
+        // ADC #$40
+        // BRK
+        let program = vec![0xa9, 0x40, 0x69, 0x40, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x80);
+        assert_eq!(cpu.reg_status.contains(Status::C), false);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::V), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_adc_output_add_two_positives_and_carrier() {
+        let mut cpu = CPU::new();
+        // SEC
+        // LDA #$3f
+        // ADC #$40
+        // BRK
+        let program = vec![0x38, 0xa9, 0x3f, 0x69, 0x40, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x80);
+        assert_eq!(cpu.reg_status.contains(Status::C), false);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::V), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_adc_output_overflow_add_two_negatives() {
+        let mut cpu = CPU::new();
+        // LDA #$80
+        // ADC #$80
+        // BRK
+        let program = vec![0xa9, 0x80, 0x69, 0x80, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::V), true);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    }
+
+    #[test]
+    fn test_adc_output_overflow_add_two_negative_and_carrier() {
+        let mut cpu = CPU::new();
+        // SEC
+        // LDA #$bf
+        // ADC #$c0
+        // BRK
+        let program = vec![0x38, 0xa9, 0xbf, 0x69, 0xc0, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x80);
+        assert_eq!(cpu.reg_status.contains(Status::V), false);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+    }
+
+    #[test]
+    fn test_sbc() {
+        let mut cpu = CPU::new();
+        // LDA #$01
+        // SBC #$01
+        // BRK
+        let program = vec![0xa9, 0x01, 0xe9, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::C), false);
+        assert_eq!(cpu.reg_status.contains(Status::V), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_sbc_carrier() {
+        let mut cpu = CPU::new();
+        // SBC
+        // LDA #$01
+        // SBC #$01
+        // BRK
+        let program = vec![0x38, 0xa9, 0x01, 0xe9, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::N), false);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::V), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
     }
 }
