@@ -1,3 +1,4 @@
+use bitflags::bitflags;
 /**
  * Simulator of 6502.
  *
@@ -6,7 +7,6 @@
 use simple_error::SimpleError;
 use std::collections::HashMap;
 use std::result::Result;
-use bitflags::bitflags;
 
 // NES platform has a special mechanism to mark where the CPU should start the execution.
 // Upon inserting a new cartridge, the CPU receives a special signal called "Reset interrupt"
@@ -52,7 +52,9 @@ impl OpCode {
     }
 }
 
+// BRK
 const OPCODE_BRK: u8 = 0x00;
+// LDA
 const OPCODE_LDA_IMMEDIATE: u8 = 0xa9;
 const OPCODE_LDA_ZEROPAGE: u8 = 0xa5;
 const OPCODE_LDA_ZEROPAGEX: u8 = 0xb5;
@@ -61,18 +63,41 @@ const OPCODE_LDA_ABSOLUTEX: u8 = 0xbd;
 const OPCODE_LDA_ABSOLUTEY: u8 = 0xb9;
 const OPCODE_LDA_INDIRECTX: u8 = 0xa1;
 const OPCODE_LDA_INDIRECTY: u8 = 0xb1;
+
+// LDX
+const OPCODE_LDX_IMMEDIATE: u8 = 0xa2;
+const OPCODE_LDX_ZEROPAGE: u8 = 0xa6;
+const OPCODE_LDX_ZEROPAGEY: u8 = 0xb6;
+const OPCODE_LDX_ABSOLUTE: u8 = 0xae;
+const OPCODE_LDX_ABSOLUTEY: u8 = 0xbe;
+
+// LDY
+const OPCODE_LDY_IMMEDIATE: u8 = 0xa0;
+const OPCODE_LDY_ZEROPAGE: u8 = 0xa4;
+const OPCODE_LDY_ZEROPAGEX: u8 = 0xb4;
+const OPCODE_LDY_ABSOLUTE: u8 = 0xac;
+const OPCODE_LDY_ABSOLUTEX: u8 = 0xbc;
+
+// JMP
 const OPCODE_JMP_ABSOLUTE: u8 = 0x4c;
 const OPCODE_JMP_INDIRECT: u8 = 0x6c;
+
+// INX
 const OPCODE_INX: u8 = 0xe8;
+
+// TAX
 const OPCODE_TAX: u8 = 0xaa;
 
 lazy_static! {
     // Hardcoded 6502 instructions.
     static ref OPCODES : Vec<OpCode> = vec![
+        // BRK
         OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
 
+        // JMP
         OpCode::new(OPCODE_JMP_ABSOLUTE, "JMP", 3, 3, AddressingMode::Absolute),
 
+        // LDA
         OpCode::new(OPCODE_LDA_IMMEDIATE, "LDA", 2, 2, AddressingMode::Immediate),
         OpCode::new(OPCODE_LDA_ZEROPAGE, "LDA", 2, 2, AddressingMode::ZeroPage),
         OpCode::new(OPCODE_LDA_ZEROPAGEX, "LDA", 2, 2, AddressingMode::ZeroPageX),
@@ -85,10 +110,29 @@ lazy_static! {
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_LDA_INDIRECTY, "LDA", 2, 5, AddressingMode::IndirectY),
 
+        // LDX
+        OpCode::new(OPCODE_LDX_IMMEDIATE, "LDX", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_LDX_ZEROPAGE, "LDX", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_LDX_ZEROPAGEY, "LDX", 2, 4, AddressingMode::ZeroPageY),
+        OpCode::new(OPCODE_LDX_ABSOLUTE, "LDX", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_LDX_ABSOLUTEY, "LDX", 3, 4, AddressingMode::AbsoluteY),
+
+        // LDY
+        OpCode::new(OPCODE_LDY_IMMEDIATE, "LDY", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_LDY_ZEROPAGE, "LDY", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_LDY_ZEROPAGEX, "LDY", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_LDY_ABSOLUTE, "LDY", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_LDY_ABSOLUTEX, "LDY", 3, 4, AddressingMode::AbsoluteX),
+
+        // INX
         OpCode::new(OPCODE_INX, "INX", 1, 2, AddressingMode::NoneAddressing),
 
+        // TAX
         OpCode::new(OPCODE_TAX, "TAX", 1, 1, AddressingMode::NoneAddressing),
     ];
+
     static ref OPCODE_MAP: HashMap<u8, &'static OpCode> = {
         let mut map: HashMap<u8, &'static OpCode> = HashMap::new();
         for opcode in &*OPCODES {
@@ -198,6 +242,18 @@ lazy_static! {
         map.insert(OPCODE_LDA_INDIRECTX, CPU::lda);
         map.insert(OPCODE_LDA_INDIRECTY, CPU::lda);
 
+        map.insert(OPCODE_LDX_IMMEDIATE, CPU::ldx);
+        map.insert(OPCODE_LDX_ZEROPAGE, CPU::ldx);
+        map.insert(OPCODE_LDX_ZEROPAGEY, CPU::ldx);
+        map.insert(OPCODE_LDX_ABSOLUTE, CPU::ldx);
+        map.insert(OPCODE_LDX_ABSOLUTEY, CPU::ldx);
+
+        map.insert(OPCODE_LDY_IMMEDIATE, CPU::ldy);
+        map.insert(OPCODE_LDY_ZEROPAGE, CPU::ldy);
+        map.insert(OPCODE_LDY_ZEROPAGEX, CPU::ldy);
+        map.insert(OPCODE_LDY_ABSOLUTE, CPU::ldy);
+        map.insert(OPCODE_LDY_ABSOLUTEX, CPU::ldy);
+
         map.insert(OPCODE_JMP_ABSOLUTE, CPU::jmp);
 
         map.insert(OPCODE_INX, CPU::inx);
@@ -226,12 +282,12 @@ bitflags! {
 }
 
 pub struct CPU {
-    pub reg_a: u8,      // register A.
-    pub reg_x: u8,      // register X.
-    pub reg_y: u8,      // register Y.
+    pub reg_a: u8,          // register A.
+    pub reg_x: u8,          // register X.
+    pub reg_y: u8,          // register Y.
     pub reg_status: Status, // program status register.
-    pub pc: u16,        // program counter.
-    mem: Mem,           // Memory.
+    pub pc: u16,            // program counter.
+    mem: Mem,               // Memory.
 }
 
 impl CPU {
@@ -412,6 +468,20 @@ impl CPU {
         self.set_zero_flag(self.reg_a);
     }
 
+    fn ldx(&mut self, addr: u16) {
+        self.reg_x = self.read_mem(addr);
+
+        self.set_negative_flag(self.reg_x);
+        self.set_zero_flag(self.reg_x);
+    }
+
+    fn ldy(&mut self, addr: u16) {
+        self.reg_y = self.read_mem(addr);
+
+        self.set_negative_flag(self.reg_y);
+        self.set_zero_flag(self.reg_y);
+    }
+
     // Handles instruction TAX.
     fn tax(&mut self, _addr: u16) {
         self.reg_x = self.reg_a;
@@ -554,6 +624,72 @@ mod test {
 
         assert_eq!(cpu.reg_a, 0x00);
         assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_ldx_immediate() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa2, 0x7c, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_x, 0x7c);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_ldx_zero_flag() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa2, 0x00, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_x, 0x00);
+        assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_ldx_negative_flag() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa2, 0xfc, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_x, 0xfc);
+        assert_eq!(cpu.reg_status, Status::N);
+    }
+
+    #[test]
+    fn test_ldy_immediate() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa0, 0x7c, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_y, 0x7c);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_ldy_zero_flag() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa0, 0x00, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_y, 0x00);
+        assert_eq!(cpu.reg_status, Status::Z);
+    }
+
+    #[test]
+    fn test_ldy_negative_flag() {
+        let mut cpu = CPU::new();
+        let program = vec![0xa0, 0xfc, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_y, 0xfc);
+        assert_eq!(cpu.reg_status, Status::N);
     }
 
     #[test]
