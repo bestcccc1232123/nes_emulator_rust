@@ -78,6 +78,15 @@ const OPCODE_LDY_ZEROPAGEX: u8 = 0xb4;
 const OPCODE_LDY_ABSOLUTE: u8 = 0xac;
 const OPCODE_LDY_ABSOLUTEX: u8 = 0xbc;
 
+// STA
+const OPCODE_STA_ZEROPAGE: u8 = 0x85;
+const OPCODE_STA_ZEROPAGEX: u8 = 0x95;
+const OPCODE_STA_ABSOLUTE: u8 = 0x8d;
+const OPCODE_STA_ABSOLUTEX: u8 = 0x9d;
+const OPCODE_STA_ABSOLUTEY: u8 = 0x99;
+const OPCODE_STA_INDIRECTX: u8 = 0x81;
+const OPCODE_STA_INDIRECTY: u8 = 0x91;
+
 // JMP
 const OPCODE_JMP_ABSOLUTE: u8 = 0x4c;
 const OPCODE_JMP_INDIRECT: u8 = 0x6c;
@@ -126,6 +135,15 @@ lazy_static! {
         OpCode::new(OPCODE_LDY_ABSOLUTE, "LDY", 3, 4, AddressingMode::Absolute),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_LDY_ABSOLUTEX, "LDY", 3, 4, AddressingMode::AbsoluteX),
+
+        // STA
+        OpCode::new(OPCODE_STA_ZEROPAGE, "STA", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_STA_ZEROPAGEX, "STA", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_STA_ABSOLUTE, "STA", 3, 4, AddressingMode::Absolute),
+        OpCode::new(OPCODE_STA_ABSOLUTEX, "STA", 3, 5, AddressingMode::AbsoluteX),
+        OpCode::new(OPCODE_STA_ABSOLUTEY, "STA", 3, 5, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_STA_INDIRECTX, "STA", 2, 6, AddressingMode::IndirectX),
+        OpCode::new(OPCODE_STA_INDIRECTY, "STA", 2, 6, AddressingMode::IndirectY),
 
         // INX
         OpCode::new(OPCODE_INX, "INX", 1, 2, AddressingMode::NoneAddressing),
@@ -254,6 +272,14 @@ lazy_static! {
         map.insert(OPCODE_LDY_ZEROPAGEX, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTE, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTEX, CPU::ldy);
+
+        map.insert(OPCODE_STA_ZEROPAGE, CPU::sta);
+        map.insert(OPCODE_STA_ZEROPAGEX, CPU::sta);
+        map.insert(OPCODE_STA_ABSOLUTE, CPU::sta);
+        map.insert(OPCODE_STA_ABSOLUTEX, CPU::sta);
+        map.insert(OPCODE_STA_ABSOLUTEY, CPU::sta);
+        map.insert(OPCODE_STA_INDIRECTX, CPU::sta);
+        map.insert(OPCODE_STA_INDIRECTY, CPU::sta);
 
         map.insert(OPCODE_JMP_ABSOLUTE, CPU::jmp);
         map.insert(OPCODE_JMP_INDIRECT, CPU::jmp);
@@ -479,6 +505,10 @@ impl CPU {
 
         self.set_negative_flag(self.reg_y);
         self.set_zero_flag(self.reg_y);
+    }
+
+    fn sta(&mut self, addr: u16) {
+        self.write_mem(addr, self.reg_a);
     }
 
     // Handles instruction TAX.
@@ -824,6 +854,26 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_a, 0x01);
+        assert_eq!(cpu.reg_status, Status::empty());
+    }
+
+    #[test]
+    fn test_sta() {
+        let mut cpu = CPU::new();
+        // LDA #$a2
+        // STA $800a
+        // LDA #$1c
+        // STA $800b
+        // 0x00         <= 0x800a
+        // 0x00         <= 0x800b
+        // BRK
+        let program = vec![
+            0xa9, 0xa2, 0x8d, 0x0a, 0x80, 0xa9, 0x1c, 0x8d, 0x0b, 0x80, 0x00, 0x00, 0x00,
+        ];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_x, 0x1c);
         assert_eq!(cpu.reg_status, Status::empty());
     }
 }
