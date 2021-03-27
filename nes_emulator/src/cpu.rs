@@ -62,6 +62,16 @@ const OPCODE_ADC_ABSOLUTEY: u8 = 0x79;
 const OPCODE_ADC_INDIRECTX: u8 = 0x61;
 const OPCODE_ADC_INDIRECTY: u8 = 0x71;
 
+// AND
+const OPCODE_AND_IMMEDIATE: u8 = 0x29;
+const OPCODE_AND_ZEROPAGE: u8 = 0x25;
+const OPCODE_AND_ZEROPAGEX: u8 = 0x35;
+const OPCODE_AND_ABSOLUTE: u8 = 0x2d;
+const OPCODE_AND_ABSOLUTEX: u8 = 0x3d;
+const OPCODE_AND_ABSOLUTEY: u8 = 0x39;
+const OPCODE_AND_INDIRECTX: u8 = 0x21;
+const OPCODE_AND_INDIRECTY: u8 = 0x31;
+
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
@@ -162,6 +172,19 @@ lazy_static! {
         OpCode::new(OPCODE_ADC_INDIRECTX, "ADC", 2, 6, AddressingMode::IndirectX),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_ADC_INDIRECTY, "ADC", 2, 5, AddressingMode::IndirectY),
+
+        // AND
+        OpCode::new(OPCODE_AND_IMMEDIATE, "AND", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_AND_ZEROPAGE, "AND", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_AND_ZEROPAGEX, "AND", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_AND_ABSOLUTE, "AND", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_AND_ABSOLUTEX, "AND", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_AND_ABSOLUTEY, "AND", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_AND_INDIRECTX, "AND", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_AND_INDIRECTY, "AND", 2, 5, AddressingMode::IndirectY),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
@@ -362,6 +385,15 @@ lazy_static! {
         map.insert(OPCODE_ADC_ABSOLUTEY, CPU::adc);
         map.insert(OPCODE_ADC_INDIRECTX, CPU::adc);
         map.insert(OPCODE_ADC_INDIRECTY, CPU::adc);
+
+        map.insert(OPCODE_AND_IMMEDIATE, CPU::and);
+        map.insert(OPCODE_AND_ZEROPAGE, CPU::and);
+        map.insert(OPCODE_AND_ZEROPAGEX, CPU::and);
+        map.insert(OPCODE_AND_ABSOLUTE, CPU::and);
+        map.insert(OPCODE_AND_ABSOLUTEX, CPU::and);
+        map.insert(OPCODE_AND_ABSOLUTEY, CPU::and);
+        map.insert(OPCODE_AND_INDIRECTX, CPU::and);
+        map.insert(OPCODE_AND_INDIRECTY, CPU::and);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -653,6 +685,12 @@ impl CPU {
         let val: u8 = self.read_mem(addr);
 
         self.add_to_reg_a(val);
+    }
+
+    fn and(&mut self, addr: u16) {
+        let val: u8 = self.read_mem(addr);
+
+        self.set_reg_a(self.reg_a & val);
     }
 
     fn brk(&mut self, _addr: u16) {}
@@ -1448,5 +1486,18 @@ mod test {
         assert_eq!(cpu.reg_status.contains(Status::C), true);
         assert_eq!(cpu.reg_status.contains(Status::V), false);
         assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    }
+
+    #[test]
+    fn test_and() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // AND #$01
+        // BRK
+        let program = vec![0xa9, 0xff, 0x29, 0x01, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x01);
     }
 }
