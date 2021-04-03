@@ -25,33 +25,6 @@ const MEM_PRG_ROM_SIZE: usize = (MEM_PRG_ROM_ADDR_END - MEM_PRG_ROM_ADDR_START) 
 
 const DEBUG_ADDR: u16 = 0xffff;
 
-// Represents a 6502 CPU opcodes.
-struct OpCode {
-    pub code: u8,
-    pub name: &'static str,
-    pub bytes: u8,
-    pub cycles: u8,
-    pub addressing_mode: AddressingMode,
-}
-
-impl OpCode {
-    fn new(
-        code: u8,
-        name: &'static str,
-        bytes: u8,
-        cycles: u8,
-        addressing_mode: AddressingMode,
-    ) -> Self {
-        OpCode {
-            code: code,
-            name: name,
-            bytes: bytes,
-            cycles: cycles,
-            addressing_mode: addressing_mode,
-        }
-    }
-}
-
 // ADC
 const OPCODE_ADC_IMMEDIATE: u8 = 0x69;
 const OPCODE_ADC_ZEROPAGE: u8 = 0x65;
@@ -71,6 +44,13 @@ const OPCODE_AND_ABSOLUTEX: u8 = 0x3d;
 const OPCODE_AND_ABSOLUTEY: u8 = 0x39;
 const OPCODE_AND_INDIRECTX: u8 = 0x21;
 const OPCODE_AND_INDIRECTY: u8 = 0x31;
+
+// ASL
+const OPCODE_ASL_ACCUMULATOR: u8 = 0x0a;
+const OPCODE_ASL_ZEROPAGE: u8 = 0x06;
+const OPCODE_ASL_ZEROPAGEX: u8 = 0x16;
+const OPCODE_ASL_ABSOLUTE: u8 = 0x0e;
+const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 
 // BRK
 const OPCODE_BRK: u8 = 0x00;
@@ -156,6 +136,33 @@ const OPCODE_SED: u8 = 0xf8;
 // SEI
 const OPCODE_SEI: u8 = 0x78;
 
+// Represents a 6502 CPU opcodes.
+struct OpCode {
+    pub code: u8,
+    pub name: &'static str,
+    pub bytes: u8,
+    pub cycles: u8,
+    pub addressing_mode: AddressingMode,
+}
+
+impl OpCode {
+    fn new(
+        code: u8,
+        name: &'static str,
+        bytes: u8,
+        cycles: u8,
+        addressing_mode: AddressingMode,
+    ) -> Self {
+        OpCode {
+            code: code,
+            name: name,
+            bytes: bytes,
+            cycles: cycles,
+            addressing_mode: addressing_mode,
+        }
+    }
+}
+
 lazy_static! {
     // Hardcoded 6502 instructions.
     static ref OPCODES : Vec<OpCode> = vec![
@@ -185,6 +192,13 @@ lazy_static! {
         OpCode::new(OPCODE_AND_INDIRECTX, "AND", 2, 6, AddressingMode::IndirectX),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_AND_INDIRECTY, "AND", 2, 5, AddressingMode::IndirectY),
+
+        // ASL
+        OpCode::new(OPCODE_ASL_ACCUMULATOR, "ASL", 1, 2, AddressingMode::Accumulator),
+        OpCode::new(OPCODE_ASL_ZEROPAGE, "ASL", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_ASL_ZEROPAGEX, "ASL", 2, 6, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_ASL_ABSOLUTE, "ASL", 3, 6, AddressingMode::Absolute),
+        OpCode::new(OPCODE_ASL_ABSOLUTEX, "ASL", 3, 7, AddressingMode::AbsoluteX),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
@@ -368,10 +382,11 @@ enum AddressingMode {
     Indirect,
     IndirectX,
     IndirectY,
+    Accumulator,
     NoneAddressing,
 }
 
-type InstructionHandler = fn(&mut CPU, u16);
+type InstructionHandler = fn(&mut CPU, &AddressingMode);
 
 lazy_static! {
     static ref INSTRUCTION_HANDLERS: HashMap<u8, InstructionHandler> = {
@@ -394,6 +409,12 @@ lazy_static! {
         map.insert(OPCODE_AND_ABSOLUTEY, CPU::and);
         map.insert(OPCODE_AND_INDIRECTX, CPU::and);
         map.insert(OPCODE_AND_INDIRECTY, CPU::and);
+
+        map.insert(OPCODE_ASL_ACCUMULATOR, CPU::asl);
+        map.insert(OPCODE_ASL_ZEROPAGE, CPU::asl);
+        map.insert(OPCODE_ASL_ZEROPAGEX, CPU::asl);
+        map.insert(OPCODE_ASL_ABSOLUTE, CPU::asl);
+        map.insert(OPCODE_ASL_ABSOLUTEX, CPU::asl);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -556,8 +577,7 @@ impl CPU {
     fn dispatch_instruction(&mut self, opcode: &OpCode) -> bool {
         let curr_pc = self.pc;
         let handler = INSTRUCTION_HANDLERS.get(&opcode.code).unwrap();
-        let addr = self.read_operand_address(self.pc.wrapping_add(1), &opcode.addressing_mode);
-        handler(self, addr);
+        handler(self, &opcode.addressing_mode);
 
         // Advance program counters if no jump happens.
         if curr_pc == self.pc {
@@ -571,7 +591,7 @@ impl CPU {
         }
     }
 
-    fn read_operand_address(&self, addr: u16, addr_mode: &AddressingMode) -> u16 {
+    fn read_mem_operand(&self, addr: u16, addr_mode: &AddressingMode) -> u16 {
         match addr_mode {
             AddressingMode::Immediate => addr,
 
@@ -602,6 +622,9 @@ impl CPU {
                 self.read_mem16(addr).wrapping_add(self.reg_y as u16)
             }
 
+            AddressingMode::Accumulator => {
+                panic!("should not read operand address when addressing mode is 'Accumulator'")
+            }
             AddressingMode::NoneAddressing => {
                 // This address returned should never be used.
                 DEBUG_ADDR
@@ -681,21 +704,53 @@ impl CPU {
         self.set_zero_flag(self.reg_a);
     }
 
-    fn adc(&mut self, addr: u16) {
+    fn get_operand_address(&self) -> u16 {
+        self.pc.wrapping_add(1)
+    }
+
+    fn adc(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         let val: u8 = self.read_mem(addr);
 
         self.add_to_reg_a(val);
     }
 
-    fn and(&mut self, addr: u16) {
+    fn and(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         let val: u8 = self.read_mem(addr);
 
         self.set_reg_a(self.reg_a & val);
     }
 
-    fn brk(&mut self, _addr: u16) {}
+    fn asl(&mut self, addr_mode: &AddressingMode) {
+        match addr_mode {
+            AddressingMode::Accumulator => {
+                if (self.reg_a & 0b1000_0000) != 0 {
+                    self.reg_status.insert(Status::C);
+                }
+                self.reg_a = self.reg_a << 1;
+                self.set_zero_flag(self.reg_a);
+                self.set_negative_flag(self.reg_a);
+            }
+            _ => {
+                let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+                let mut val: u8 = self.read_mem(addr);
+                if (val & 0b1000_0000) != 0 {
+                    self.reg_status.insert(Status::C);
+                }
+                val = val << 1;
+                self.write_mem(addr, val);
+                self.set_zero_flag(val);
+                self.set_negative_flag(val);
+            }
+        }
+    }
 
-    fn inx(&mut self, _addr: u16) {
+    fn brk(&mut self, _addr_mode: &AddressingMode) {}
+
+    fn inx(&mut self, _addr_mode: &AddressingMode) {
         let (val_x, _overflow) = self.reg_x.overflowing_add(1);
         self.reg_x = val_x;
 
@@ -703,86 +758,102 @@ impl CPU {
         self.set_zero_flag(self.reg_x);
     }
 
-    fn jmp(&mut self, addr: u16) {
+    fn jmp(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.pc = addr;
     }
 
-    fn lda(&mut self, addr: u16) {
+    fn lda(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.reg_a = self.read_mem(addr);
 
         self.set_negative_flag(self.reg_a);
         self.set_zero_flag(self.reg_a);
     }
 
-    fn ldx(&mut self, addr: u16) {
+    fn ldx(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.reg_x = self.read_mem(addr);
 
         self.set_negative_flag(self.reg_x);
         self.set_zero_flag(self.reg_x);
     }
 
-    fn ldy(&mut self, addr: u16) {
+    fn ldy(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.reg_y = self.read_mem(addr);
 
         self.set_negative_flag(self.reg_y);
         self.set_zero_flag(self.reg_y);
     }
 
-    fn sta(&mut self, addr: u16) {
+    fn sta(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.write_mem(addr, self.reg_a);
     }
 
-    fn stx(&mut self, addr: u16) {
+    fn stx(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.write_mem(addr, self.reg_x);
     }
 
-    fn sty(&mut self, addr: u16) {
+    fn sty(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         self.write_mem(addr, self.reg_y);
     }
 
-    fn tax(&mut self, _addr: u16) {
+    fn tax(&mut self, _addr_mode: &AddressingMode) {
         self.reg_x = self.reg_a;
 
         self.set_negative_flag(self.reg_x);
         self.set_zero_flag(self.reg_x);
     }
 
-    fn tay(&mut self, _addr: u16) {
+    fn tay(&mut self, _addr_mode: &AddressingMode) {
         self.reg_y = self.reg_a;
 
         self.set_negative_flag(self.reg_y);
         self.set_zero_flag(self.reg_y);
     }
 
-    fn txa(&mut self, _addr: u16) {
+    fn txa(&mut self, _addr_mode: &AddressingMode) {
         self.reg_a = self.reg_x;
 
         self.set_negative_flag(self.reg_a);
         self.set_zero_flag(self.reg_a);
     }
 
-    fn tya(&mut self, _addr: u16) {
+    fn tya(&mut self, _addr_mode: &AddressingMode) {
         self.reg_a = self.reg_y;
 
         self.set_negative_flag(self.reg_a);
         self.set_zero_flag(self.reg_a);
     }
 
-    fn sbc(&mut self, addr: u16) {
+    fn sbc(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+
         let val = self.read_mem(addr);
 
         self.add_to_reg_a(!val);
     }
 
-    fn sec(&mut self, _addr: u16) {
+    fn sec(&mut self, _addr_mode: &AddressingMode) {
         self.reg_status.insert(Status::C);
     }
 
-    fn sed(&mut self, _addr: u16) {
+    fn sed(&mut self, _addr_mode: &AddressingMode) {
         self.reg_status.insert(Status::D);
     }
 
-    fn sei(&mut self, _addr: u16) {
+    fn sei(&mut self, _addr_mode: &AddressingMode) {
         self.reg_status.insert(Status::I);
     }
 }
@@ -1499,5 +1570,130 @@ mod test {
         assert_eq!(cpu.interpret(&program), Ok(()));
 
         assert_eq!(cpu.reg_a, 0x01);
+    }
+
+    #[test]
+    fn test_asl() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // ASL A
+        // BRK
+        let program = vec![0xa9, 0xff, 0x0a, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xfe);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_asl_zero() {
+        let mut cpu = CPU::new();
+        // LDA #$00
+        // ASL A
+        // BRK
+        let program = vec![0xa9, 0x00, 0x0a, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::C), false);
+        assert_eq!(cpu.reg_status.contains(Status::N), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    }
+
+    #[test]
+    fn test_asl_zeropage() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // STA $f0
+        // ASL $f0
+        // BRK
+        let program = vec![0xa9, 0xff, 0x85, 0xf0, 0x06, 0xf0, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.read_mem(0x00f0), 0xfe);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_asl_zero_zeropage() {
+        let mut cpu = CPU::new();
+        // LDA #$00
+        // STA $f0
+        // ASL $f0
+        // BRK
+        let program = vec![0xa9, 0x00, 0x85, 0xf0, 0x06, 0xf0, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.read_mem(0x00f0), 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::C), false);
+        assert_eq!(cpu.reg_status.contains(Status::N), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    }
+
+    #[test]
+    fn test_asl_zeropagex() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // STA $f0
+        // LDX #$01
+        // ASL $ef, X
+        // BRK
+        let program = vec![0xa9, 0xff, 0x85, 0xf0, 0xa2, 0x01, 0x16, 0xef, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.read_mem(0x00f0), 0xfe);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_asl_absolute() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // STA $f0
+        // LDX #$01
+        // ASL $00ef
+        // BRK
+        let program = vec![0xa9, 0xff, 0x85, 0xf0, 0xa2, 0x01, 0x1e, 0xef, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.read_mem(0x00f0), 0xfe);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_asl_absolutex() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // STA $f0
+        // LDX #$01
+        // ASL $00ef, x
+        // BRK
+        let program = vec![0xa9, 0xff, 0x85, 0xf0, 0xa2, 0x01, 0x1e, 0xef, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.read_mem(0x00f0), 0xfe);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
     }
 }
