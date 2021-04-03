@@ -55,6 +55,16 @@ const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
+// EOR
+const OPCODE_EOR_IMMEDIATE: u8 = 0x49;
+const OPCODE_EOR_ZEROPAGE: u8 = 0x45;
+const OPCODE_EOR_ZEROPAGEX: u8 = 0x55;
+const OPCODE_EOR_ABSOLUTE: u8 = 0x4d;
+const OPCODE_EOR_ABSOLUTEX: u8 = 0x5d;
+const OPCODE_EOR_ABSOLUTEY: u8 = 0x59;
+const OPCODE_EOR_INDIRECTX: u8 = 0x41;
+const OPCODE_EOR_INDIRECTY: u8 = 0x51;
+
 // LDA
 const OPCODE_LDA_IMMEDIATE: u8 = 0xa9;
 const OPCODE_LDA_ZEROPAGE: u8 = 0xa5;
@@ -202,6 +212,19 @@ lazy_static! {
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
+
+        // EOR
+        OpCode::new(OPCODE_EOR_IMMEDIATE, "EOR", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_EOR_ZEROPAGE, "EOR", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_EOR_ZEROPAGEX, "EOR", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_EOR_ABSOLUTE, "EOR", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_EOR_ABSOLUTEX, "EOR", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_EOR_ABSOLUTEY, "EOR", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_EOR_INDIRECTX, "EOR", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_EOR_INDIRECTY, "EOR", 2, 5, AddressingMode::IndirectY),
 
         // JMP
         OpCode::new(OPCODE_JMP_ABSOLUTE, "JMP", 3, 3, AddressingMode::Absolute),
@@ -417,6 +440,15 @@ lazy_static! {
         map.insert(OPCODE_ASL_ABSOLUTEX, CPU::asl);
 
         map.insert(OPCODE_BRK, CPU::brk);
+
+        map.insert(OPCODE_EOR_IMMEDIATE, CPU::eor);
+        map.insert(OPCODE_EOR_ZEROPAGE, CPU::eor);
+        map.insert(OPCODE_EOR_ZEROPAGEX, CPU::eor);
+        map.insert(OPCODE_EOR_ABSOLUTE, CPU::eor);
+        map.insert(OPCODE_EOR_ABSOLUTEX, CPU::eor);
+        map.insert(OPCODE_EOR_ABSOLUTEY, CPU::eor);
+        map.insert(OPCODE_EOR_INDIRECTX, CPU::eor);
+        map.insert(OPCODE_EOR_INDIRECTY, CPU::eor);
 
         map.insert(OPCODE_LDA_IMMEDIATE, CPU::lda);
         map.insert(OPCODE_LDA_ZEROPAGE, CPU::lda);
@@ -749,6 +781,12 @@ impl CPU {
     }
 
     fn brk(&mut self, _addr_mode: &AddressingMode) {}
+
+    fn eor(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+        let val = self.read_mem(addr);
+        self.set_reg_a(self.reg_a ^ val);
+    }
 
     fn inx(&mut self, _addr_mode: &AddressingMode) {
         let (val_x, _overflow) = self.reg_x.overflowing_add(1);
@@ -1695,5 +1733,35 @@ mod test {
         assert_eq!(cpu.reg_status.contains(Status::C), true);
         assert_eq!(cpu.reg_status.contains(Status::N), true);
         assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_eor() {
+        let mut cpu = CPU::new();
+        // LDA #$f0
+        // EOR #$0f
+        // BRK
+        let program = vec![0xa9, 0xf0, 0x49, 0x0f, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_eor_zero() {
+        let mut cpu = CPU::new();
+        // LDA #$ff
+        // EOR #$ff
+        // BRK
+        let program = vec![0xa9, 0xff, 0x49, 0xff, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::N), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
     }
 }
