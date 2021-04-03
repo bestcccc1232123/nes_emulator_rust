@@ -61,6 +61,10 @@ const OPCODE_BEQ: u8 = 0xf0;
 // BCS
 const OPCODE_BCS: u8 = 0xb0;
 
+// BIT
+const OPCODE_BIT_ZEROPAGE: u8 = 0x24;
+const OPCODE_BIT_ABSOLUTE: u8 = 0x2c;
+
 // BNE
 const OPCODE_BNE: u8 = 0xd0;
 
@@ -276,6 +280,10 @@ lazy_static! {
         // BEQ
         // Cycles + 1 if branch succeeds, +2 if to a new page.
         OpCode::new(OPCODE_BEQ, "BEQ", 2, 2, AddressingMode::Relative),
+
+        // BIT
+        OpCode::new(OPCODE_BIT_ZEROPAGE, "BIT", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_BIT_ABSOLUTE, "BIT", 3, 4, AddressingMode::Absolute),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
@@ -562,6 +570,9 @@ lazy_static! {
         map.insert(OPCODE_BCS, CPU::bcs);
 
         map.insert(OPCODE_BEQ, CPU::beq);
+
+        map.insert(OPCODE_BIT_ZEROPAGE, CPU::bit);
+        map.insert(OPCODE_BIT_ABSOLUTE, CPU::bit);
 
         map.insert(OPCODE_BNE, CPU::bne);
 
@@ -1000,6 +1011,29 @@ impl CPU {
         }
 
         self.branch();
+    }
+
+    fn bit(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+        let val: u8 = self.read_mem(addr);
+
+        if val & 0b1000_0000 != 0 {
+            self.reg_status.insert(Status::N);
+        } else {
+            self.reg_status.remove(Status::N);
+        }
+
+        if val & 0b0100_0000 != 0 {
+            self.reg_status.insert(Status::V);
+        } else {
+            self.reg_status.remove(Status::V);
+        }
+
+        if self.reg_a & val == 0 {
+            self.reg_status.insert(Status::Z);
+        } else {
+            self.reg_status.remove(Status::Z);
+        }
     }
 
     fn bne(&mut self, addr_mode: &AddressingMode) {
@@ -2677,4 +2711,58 @@ fn test_bne_zero_clear_backward() {
 
     assert_eq!(cpu.reg_a, 0x01);
     assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_bit_zero() {
+    let mut cpu = CPU::new();
+    // LDA #$0f
+    // STA $f0
+    // LDA #$f0
+    // BIT $f0
+    // BRK
+    let program = vec![0xa9, 0x0f, 0x85, 0xf0, 0xa9, 0xf0, 0x24, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xf0);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+}
+
+#[test]
+fn test_bit_none_zero() {
+    let mut cpu = CPU::new();
+    // LDA #$0f
+    // STA $f0
+    // LDA #$0f
+    // BIT $f0
+    // BRK
+    let program = vec![0xa9, 0x0f, 0x85, 0xf0, 0xa9, 0x0f, 0x24, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x0f);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+}
+
+#[test]
+fn test_bit_negative_and_overflow_flag() {
+    let mut cpu = CPU::new();
+    // LDA #$f0
+    // STA $f0
+    // LDA #$0f
+    // BIT $f0
+    // BRK
+    let program = vec![0xa9, 0xf0, 0x85, 0xf0, 0xa9, 0x0f, 0x24, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x0f);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    assert_eq!(cpu.reg_status.contains(Status::V), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
 }
