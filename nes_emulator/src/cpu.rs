@@ -52,6 +52,9 @@ const OPCODE_ASL_ZEROPAGEX: u8 = 0x16;
 const OPCODE_ASL_ABSOLUTE: u8 = 0x0e;
 const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 
+// BCC
+const OPCODE_BCC: u8 = 0x90;
+
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
@@ -252,6 +255,9 @@ lazy_static! {
         OpCode::new(OPCODE_ASL_ZEROPAGEX, "ASL", 2, 6, AddressingMode::ZeroPageX),
         OpCode::new(OPCODE_ASL_ABSOLUTE, "ASL", 3, 6, AddressingMode::Absolute),
         OpCode::new(OPCODE_ASL_ABSOLUTEX, "ASL", 3, 7, AddressingMode::AbsoluteX),
+
+        // BCC
+        OpCode::new(OPCODE_BCC, "BCC", 2, 2, AddressingMode::Relative),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
@@ -482,7 +488,7 @@ impl Mem {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum AddressingMode {
     Immediate,
     ZeroPage,
@@ -495,6 +501,7 @@ enum AddressingMode {
     IndirectX,
     IndirectY,
     Accumulator,
+    Relative,
     NoneAddressing,
 }
 
@@ -527,6 +534,8 @@ lazy_static! {
         map.insert(OPCODE_ASL_ZEROPAGEX, CPU::asl);
         map.insert(OPCODE_ASL_ABSOLUTE, CPU::asl);
         map.insert(OPCODE_ASL_ABSOLUTEX, CPU::asl);
+
+        map.insert(OPCODE_BCC, CPU::bcc);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -775,9 +784,16 @@ impl CPU {
                 self.read_mem16(addr).wrapping_add(self.reg_y as u16)
             }
 
+            AddressingMode::Relative => addr,
+
             AddressingMode::Accumulator => {
-                panic!("should not read operand address when addressing mode is 'Accumulator'")
+                // TODO: we should also dump CPU state here.
+                panic!(
+                    "should not read operand address when addressing mode is {:?}",
+                    addr_mode
+                )
             }
+
             AddressingMode::NoneAddressing => {
                 // This address returned should never be used.
                 DEBUG_ADDR
@@ -861,6 +877,17 @@ impl CPU {
         self.pc.wrapping_add(1)
     }
 
+    fn calc_new_pc(&self, relative_addr: i8) -> (u16, bool) {
+        let new_pc: u16 = 0;
+        let overflow: bool = false;
+        if relative_addr > 0 {
+            let (new_pc, overflow) = self.pc.overflowing_add(relative_addr as u16);
+        } else {
+            let (new_pc, overflow) = self.pc.overflowing_sub((-relative_addr) as u16);
+        }
+        (new_pc, overflow)
+    }
+
     fn adc(&mut self, addr_mode: &AddressingMode) {
         let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
 
@@ -901,6 +928,25 @@ impl CPU {
                 self.set_negative_flag(val);
             }
         }
+    }
+
+    fn bcc(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if self.reg_status.contains(Status::C) {
+            return;
+        }
+
+        let relative_addr: i8 = self.read_mem_operand(self.get_operand_address(), addr_mode) as i8;
+        let (new_pc, overflow) = self.calc_new_pc(relative_addr);
+        if overflow {
+            panic!(
+                "branch with a relative address {} that causes program counter {} to overflow",
+                relative_addr, self.pc
+            )
+        }
+
+        self.pc = new_pc;
     }
 
     fn brk(&mut self, _addr_mode: &AddressingMode) {}
@@ -2360,4 +2406,56 @@ fn test_clv() {
 
     assert_eq!(cpu.reg_a, 0x00);
     assert_eq!(cpu.reg_status.contains(Status::V), false);
+}
+
+#[test]
+fn test_bcc_carrier_set() {
+    let mut cpu = CPU::new();
+    // SEC
+    // BCC LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0x38, 0x90, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+}
+
+#[test]
+fn test_bcc_carrier_clear() {
+    let mut cpu = CPU::new();
+    // CLC
+    // BCC LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0x18, 0x90, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+}
+
+#[test]
+fn test_bcc_carrier_clear_backward() {
+    let mut cpu = CPU::new();
+    // CLC
+    // BCC LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BCC LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0x18, 0x90, 0x03, 0xa9, 0xff, 0x00, 0x90, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
 }
