@@ -89,6 +89,16 @@ const OPCODE_LDY_ZEROPAGEX: u8 = 0xb4;
 const OPCODE_LDY_ABSOLUTE: u8 = 0xac;
 const OPCODE_LDY_ABSOLUTEX: u8 = 0xbc;
 
+// ORA
+const OPCODE_ORA_IMMEDIATE: u8 = 0x09;
+const OPCODE_ORA_ZEROPAGE: u8 = 0x05;
+const OPCODE_ORA_ZEROPAGEX: u8 = 0x15;
+const OPCODE_ORA_ABSOLUTE: u8 = 0x0d;
+const OPCODE_ORA_ABSOLUTEX: u8 = 0x1d;
+const OPCODE_ORA_ABSOLUTEY: u8 = 0x19;
+const OPCODE_ORA_INDIRECTX: u8 = 0x01;
+const OPCODE_ORA_INDIRECTY: u8 = 0x11;
+
 // STA
 const OPCODE_STA_ZEROPAGE: u8 = 0x85;
 const OPCODE_STA_ZEROPAGEX: u8 = 0x95;
@@ -258,6 +268,19 @@ lazy_static! {
         OpCode::new(OPCODE_LDY_ABSOLUTE, "LDY", 3, 4, AddressingMode::Absolute),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_LDY_ABSOLUTEX, "LDY", 3, 4, AddressingMode::AbsoluteX),
+
+        // ORA
+        OpCode::new(OPCODE_ORA_IMMEDIATE, "ORA", 2, 2, AddressingMode::Immediate),
+        OpCode::new(OPCODE_ORA_ZEROPAGE, "ORA", 2, 3, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_ORA_ZEROPAGEX, "ORA", 2, 4, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_ORA_ABSOLUTE, "ORA", 3, 4, AddressingMode::Absolute),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ORA_ABSOLUTEX, "ORA", 3, 4, AddressingMode::AbsoluteX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ORA_ABSOLUTEY, "ORA", 3, 4, AddressingMode::AbsoluteY),
+        OpCode::new(OPCODE_ORA_INDIRECTX, "ORA", 2, 6, AddressingMode::IndirectX),
+        // Cycles +1 if page crossed.
+        OpCode::new(OPCODE_ORA_INDIRECTY, "ORA", 2, 5, AddressingMode::IndirectY),
 
         // STA
         OpCode::new(OPCODE_STA_ZEROPAGE, "STA", 2, 3, AddressingMode::ZeroPage),
@@ -470,6 +493,15 @@ lazy_static! {
         map.insert(OPCODE_LDY_ZEROPAGEX, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTE, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTEX, CPU::ldy);
+
+        map.insert(OPCODE_ORA_IMMEDIATE, CPU::ora);
+        map.insert(OPCODE_ORA_ZEROPAGE, CPU::ora);
+        map.insert(OPCODE_ORA_ZEROPAGEX, CPU::ora);
+        map.insert(OPCODE_ORA_ABSOLUTE, CPU::ora);
+        map.insert(OPCODE_ORA_ABSOLUTEX, CPU::ora);
+        map.insert(OPCODE_ORA_ABSOLUTEY, CPU::ora);
+        map.insert(OPCODE_ORA_INDIRECTX, CPU::ora);
+        map.insert(OPCODE_ORA_INDIRECTY, CPU::ora);
 
         map.insert(OPCODE_STA_ZEROPAGE, CPU::sta);
         map.insert(OPCODE_STA_ZEROPAGEX, CPU::sta);
@@ -827,6 +859,13 @@ impl CPU {
 
         self.set_negative_flag(self.reg_y);
         self.set_zero_flag(self.reg_y);
+    }
+
+    fn ora(&mut self, addr_mode: &AddressingMode) {
+        let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+        let val = self.read_mem(addr);
+
+        self.set_reg_a(val | self.reg_a);
     }
 
     fn sta(&mut self, addr_mode: &AddressingMode) {
@@ -1757,6 +1796,36 @@ mod test {
         // EOR #$ff
         // BRK
         let program = vec![0xa9, 0xff, 0x49, 0xff, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0x00);
+        assert_eq!(cpu.reg_status.contains(Status::N), false);
+        assert_eq!(cpu.reg_status.contains(Status::Z), true);
+    }
+
+    #[test]
+    fn test_ora() {
+        let mut cpu = CPU::new();
+        // LDA #$f0
+        // ORA #$0f
+        // BRK
+        let program = vec![0xa9, 0xf0, 0x09, 0x0f, 0x00];
+
+        assert_eq!(cpu.interpret(&program), Ok(()));
+
+        assert_eq!(cpu.reg_a, 0xff);
+        assert_eq!(cpu.reg_status.contains(Status::N), true);
+        assert_eq!(cpu.reg_status.contains(Status::Z), false);
+    }
+
+    #[test]
+    fn test_ora_zero() {
+        let mut cpu = CPU::new();
+        // LDA #$00
+        // ORA #$00
+        // BRK
+        let program = vec![0xa9, 0x00, 0x09, 0x00, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
