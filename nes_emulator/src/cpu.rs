@@ -55,6 +55,18 @@ const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
+// CLC
+const OPCODE_CLC: u8 = 0x18;
+
+// CLD
+const OPCODE_CLD: u8 = 0xd8;
+
+// CLI
+const OPCODE_CLI: u8 = 0x58;
+
+// CLV
+const OPCODE_CLV: u8 = 0xb8;
+
 // EOR
 const OPCODE_EOR_IMMEDIATE: u8 = 0x49;
 const OPCODE_EOR_ZEROPAGE: u8 = 0x45;
@@ -242,7 +254,19 @@ lazy_static! {
         OpCode::new(OPCODE_ASL_ABSOLUTEX, "ASL", 3, 7, AddressingMode::AbsoluteX),
 
         // BRK
-        OpCode::new(OPCODE_BRK, "BRK", 0, 7, AddressingMode::NoneAddressing),
+        OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
+
+        // CLC
+        OpCode::new(OPCODE_CLC, "CLC", 1, 2, AddressingMode::NoneAddressing),
+
+        // CLD
+        OpCode::new(OPCODE_CLD, "CLD", 1, 2, AddressingMode::NoneAddressing),
+
+        // CLI
+        OpCode::new(OPCODE_CLI, "CLI", 1, 2, AddressingMode::NoneAddressing),
+
+        // CLV
+        OpCode::new(OPCODE_CLV, "CLV", 1, 2, AddressingMode::NoneAddressing),
 
         // EOR
         OpCode::new(OPCODE_EOR_IMMEDIATE, "EOR", 2, 2, AddressingMode::Immediate),
@@ -505,6 +529,11 @@ lazy_static! {
         map.insert(OPCODE_ASL_ABSOLUTEX, CPU::asl);
 
         map.insert(OPCODE_BRK, CPU::brk);
+
+        map.insert(OPCODE_CLC, CPU::clc);
+        map.insert(OPCODE_CLD, CPU::cld);
+        map.insert(OPCODE_CLI, CPU::cli);
+        map.insert(OPCODE_CLV, CPU::clv);
 
         map.insert(OPCODE_EOR_IMMEDIATE, CPU::eor);
         map.insert(OPCODE_EOR_ZEROPAGE, CPU::eor);
@@ -875,6 +904,22 @@ impl CPU {
     }
 
     fn brk(&mut self, _addr_mode: &AddressingMode) {}
+
+    fn clc(&mut self, _addr_mode: &AddressingMode) {
+        self.reg_status.remove(Status::C);
+    }
+
+    fn cld(&mut self, _addr_mode: &AddressingMode) {
+        self.reg_status.remove(Status::D);
+    }
+
+    fn cli(&mut self, _addr_mode: &AddressingMode) {
+        self.reg_status.remove(Status::I);
+    }
+
+    fn clv(&mut self, _addr_mode: &AddressingMode) {
+        self.reg_status.remove(Status::V);
+    }
 
     fn eor(&mut self, addr_mode: &AddressingMode) {
         let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
@@ -1622,13 +1667,13 @@ mod test {
     #[test]
     fn test_sec() {
         let mut cpu = CPU::new();
-        // SEI
+        // SEC
         // BRK
-        let program = vec![0x78, 0x00];
+        let program = vec![0x38, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
-        assert_eq!(cpu.reg_status.contains(Status::I), true);
+        assert_eq!(cpu.reg_status.contains(Status::C), true);
     }
 
     #[test]
@@ -1646,13 +1691,13 @@ mod test {
     #[test]
     fn test_sei() {
         let mut cpu = CPU::new();
-        // SEC
+        // SEI
         // BRK
-        let program = vec![0x38, 0x00];
+        let program = vec![0x78, 0x00];
 
         assert_eq!(cpu.interpret(&program), Ok(()));
 
-        assert_eq!(cpu.reg_status.contains(Status::C), true);
+        assert_eq!(cpu.reg_status.contains(Status::I), true);
     }
 
     #[test]
@@ -2261,4 +2306,58 @@ fn test_ror_carrier_zeropage() {
     assert_eq!(cpu.reg_status.contains(Status::C), true);
     assert_eq!(cpu.reg_status.contains(Status::N), true);
     assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_clc() {
+    let mut cpu = CPU::new();
+    // SEC
+    // CLC
+    // BRK
+    let program = vec![0x38, 0x18, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+}
+
+#[test]
+fn test_cld() {
+    let mut cpu = CPU::new();
+    // SED
+    // CLD
+    // BRK
+    let program = vec![0xf8, 0xd8, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_status.contains(Status::D), false);
+}
+
+#[test]
+fn test_cli() {
+    let mut cpu = CPU::new();
+    // SEI
+    // CLI
+    // BRK
+    let program = vec![0x78, 0x58, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_status.contains(Status::I), false);
+}
+
+#[test]
+fn test_clv() {
+    let mut cpu = CPU::new();
+    // LDA #$80
+    // ADC #$80
+    // CLV
+    // BRK
+    let program = vec![0xa9, 0x80, 0x69, 0x80, 0xb8, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
 }
