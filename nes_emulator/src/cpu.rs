@@ -106,6 +106,13 @@ const OPCODE_ORA_ABSOLUTEY: u8 = 0x19;
 const OPCODE_ORA_INDIRECTX: u8 = 0x01;
 const OPCODE_ORA_INDIRECTY: u8 = 0x11;
 
+// ROL
+const OPCODE_ROL_ACCUMULATOR: u8 = 0x2a;
+const OPCODE_ROL_ZEROPAGE: u8 = 0x26;
+const OPCODE_ROL_ZEROPAGEX: u8 = 0x36;
+const OPCODE_ROL_ABSOLUTE: u8 = 0x2e;
+const OPCODE_ROL_ABSOLUTEX: u8 = 0x3e;
+
 // STA
 const OPCODE_STA_ZEROPAGE: u8 = 0x85;
 const OPCODE_STA_ZEROPAGEX: u8 = 0x95;
@@ -295,6 +302,13 @@ lazy_static! {
         OpCode::new(OPCODE_ORA_INDIRECTX, "ORA", 2, 6, AddressingMode::IndirectX),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_ORA_INDIRECTY, "ORA", 2, 5, AddressingMode::IndirectY),
+
+        // ROL
+        OpCode::new(OPCODE_ROL_ACCUMULATOR, "ROL", 1, 2, AddressingMode::Accumulator),
+        OpCode::new(OPCODE_ROL_ZEROPAGE, "ROL", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_ROL_ZEROPAGEX, "ROL", 2, 6, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_ROL_ABSOLUTE, "ROL", 3, 6, AddressingMode::Absolute),
+        OpCode::new(OPCODE_ROL_ABSOLUTEX, "ROL", 3, 7, AddressingMode::AbsoluteX),
 
         // STA
         OpCode::new(OPCODE_STA_ZEROPAGE, "STA", 2, 3, AddressingMode::ZeroPage),
@@ -522,6 +536,12 @@ lazy_static! {
         map.insert(OPCODE_ORA_ABSOLUTEY, CPU::ora);
         map.insert(OPCODE_ORA_INDIRECTX, CPU::ora);
         map.insert(OPCODE_ORA_INDIRECTY, CPU::ora);
+
+        map.insert(OPCODE_ROL_ACCUMULATOR, CPU::rol);
+        map.insert(OPCODE_ROL_ZEROPAGE, CPU::rol);
+        map.insert(OPCODE_ROL_ZEROPAGEX, CPU::rol);
+        map.insert(OPCODE_ROL_ABSOLUTE, CPU::rol);
+        map.insert(OPCODE_ROL_ABSOLUTEX, CPU::rol);
 
         map.insert(OPCODE_STA_ZEROPAGE, CPU::sta);
         map.insert(OPCODE_STA_ZEROPAGEX, CPU::sta);
@@ -914,6 +934,38 @@ impl CPU {
         let val = self.read_mem(addr);
 
         self.set_reg_a(val | self.reg_a);
+    }
+
+    fn rol(&mut self, addr_mode: &AddressingMode) {
+        let mut carrier = 0;
+        if self.reg_status.contains(Status::C) {
+            carrier = 0b0000_0001;
+        } else {
+            carrier = 0b0000_0000;
+        }
+        match addr_mode {
+            AddressingMode::Accumulator => {
+                if (self.reg_a & 0b1000_0000) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                self.set_reg_a((self.reg_a << 1) | carrier);
+            }
+            _ => {
+                let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+                let mut val: u8 = self.read_mem(addr);
+                if (val & 0b1000_0000) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                val = (val << 1) | carrier;
+                self.write_mem(addr, val);
+                self.set_zero_flag(val);
+                self.set_negative_flag(val);
+            }
+        }
     }
 
     fn sta(&mut self, addr_mode: &AddressingMode) {
@@ -1949,4 +2001,108 @@ fn test_lsr_zero_zeropage() {
     assert_eq!(cpu.reg_status.contains(Status::C), false);
     assert_eq!(cpu.reg_status.contains(Status::N), false);
     assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_rol() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // ROL A
+    // BRK
+    let program = vec![0xa9, 0xff, 0x2a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xfe);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_rol_zero() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // ROL A
+    // BRK
+    let program = vec![0xa9, 0x00, 0x2a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_rol_carrier() {
+    let mut cpu = CPU::new();
+    // SEC
+    // LDA #$ff
+    // ROL A
+    // BRK
+    let program = vec![0x38, 0xa9, 0xff, 0x2a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_rol_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // STA $f0
+    // ROL $f0
+    // BRK
+    let program = vec![0xa9, 0xff, 0x85, 0xf0, 0x26, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.read_mem(0x00f0), 0xfe);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_rol_zero_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // STA $f0
+    // ROL $f0
+    // BRK
+    let program = vec![0xa9, 0x00, 0x85, 0xf0, 0x26, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.read_mem(0x00f0), 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_rol_carrier_zeropage() {
+    let mut cpu = CPU::new();
+    // SEC
+    // LDA #$ff
+    // STA $f0
+    // ROL $f0
+    // BRK
+    let program = vec![0x38, 0xa9, 0xff, 0x85, 0xf0, 0x26, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.read_mem(0x00f0), 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
 }
