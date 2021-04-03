@@ -113,6 +113,13 @@ const OPCODE_ROL_ZEROPAGEX: u8 = 0x36;
 const OPCODE_ROL_ABSOLUTE: u8 = 0x2e;
 const OPCODE_ROL_ABSOLUTEX: u8 = 0x3e;
 
+// ROR
+const OPCODE_ROR_ACCUMULATOR: u8 = 0x6a;
+const OPCODE_ROR_ZEROPAGE: u8 = 0x66;
+const OPCODE_ROR_ZEROPAGEX: u8 = 0x76;
+const OPCODE_ROR_ABSOLUTE: u8 = 0x6e;
+const OPCODE_ROR_ABSOLUTEX: u8 = 0x7e;
+
 // STA
 const OPCODE_STA_ZEROPAGE: u8 = 0x85;
 const OPCODE_STA_ZEROPAGEX: u8 = 0x95;
@@ -309,6 +316,13 @@ lazy_static! {
         OpCode::new(OPCODE_ROL_ZEROPAGEX, "ROL", 2, 6, AddressingMode::ZeroPageX),
         OpCode::new(OPCODE_ROL_ABSOLUTE, "ROL", 3, 6, AddressingMode::Absolute),
         OpCode::new(OPCODE_ROL_ABSOLUTEX, "ROL", 3, 7, AddressingMode::AbsoluteX),
+
+        // ROR
+        OpCode::new(OPCODE_ROR_ACCUMULATOR, "ROR", 1, 2, AddressingMode::Accumulator),
+        OpCode::new(OPCODE_ROR_ZEROPAGE, "ROR", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_ROR_ZEROPAGEX, "ROR", 2, 6, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_ROR_ABSOLUTE, "ROR", 3, 6, AddressingMode::Absolute),
+        OpCode::new(OPCODE_ROR_ABSOLUTEX, "ROR", 3, 7, AddressingMode::AbsoluteX),
 
         // STA
         OpCode::new(OPCODE_STA_ZEROPAGE, "STA", 2, 3, AddressingMode::ZeroPage),
@@ -542,6 +556,12 @@ lazy_static! {
         map.insert(OPCODE_ROL_ZEROPAGEX, CPU::rol);
         map.insert(OPCODE_ROL_ABSOLUTE, CPU::rol);
         map.insert(OPCODE_ROL_ABSOLUTEX, CPU::rol);
+
+        map.insert(OPCODE_ROR_ACCUMULATOR, CPU::ror);
+        map.insert(OPCODE_ROR_ZEROPAGE, CPU::ror);
+        map.insert(OPCODE_ROR_ZEROPAGEX, CPU::ror);
+        map.insert(OPCODE_ROR_ABSOLUTE, CPU::ror);
+        map.insert(OPCODE_ROR_ABSOLUTEX, CPU::ror);
 
         map.insert(OPCODE_STA_ZEROPAGE, CPU::sta);
         map.insert(OPCODE_STA_ZEROPAGEX, CPU::sta);
@@ -961,6 +981,38 @@ impl CPU {
                     self.reg_status.remove(Status::C);
                 }
                 val = (val << 1) | carrier;
+                self.write_mem(addr, val);
+                self.set_zero_flag(val);
+                self.set_negative_flag(val);
+            }
+        }
+    }
+
+    fn ror(&mut self, addr_mode: &AddressingMode) {
+        let mut carrier = 0;
+        if self.reg_status.contains(Status::C) {
+            carrier = 0b1000_0000;
+        } else {
+            carrier = 0b0000_0000;
+        }
+        match addr_mode {
+            AddressingMode::Accumulator => {
+                if (self.reg_a & 0b0000_0001) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                self.set_reg_a((self.reg_a >> 1) | carrier);
+            }
+            _ => {
+                let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+                let mut val: u8 = self.read_mem(addr);
+                if (val & 0b000_0001) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                val = (val >> 1) | carrier;
                 self.write_mem(addr, val);
                 self.set_zero_flag(val);
                 self.set_negative_flag(val);
@@ -2097,6 +2149,110 @@ fn test_rol_carrier_zeropage() {
     // ROL $f0
     // BRK
     let program = vec![0x38, 0xa9, 0xff, 0x85, 0xf0, 0x26, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.read_mem(0x00f0), 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_ror() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // ROR A
+    // BRK
+    let program = vec![0xa9, 0xff, 0x6a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x7f);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_ror_zero() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // ROR A
+    // BRK
+    let program = vec![0xa9, 0x00, 0x6a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_ror_carrier() {
+    let mut cpu = CPU::new();
+    // SEC
+    // LDA #$ff
+    // ROR A
+    // BRK
+    let program = vec![0x38, 0xa9, 0xff, 0x6a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_ror_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // STA $f0
+    // ROR $f0
+    // BRK
+    let program = vec![0xa9, 0xff, 0x85, 0xf0, 0x66, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.read_mem(0x00f0), 0x7f);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_ror_zero_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // STA $f0
+    // ROR $f0
+    // BRK
+    let program = vec![0xa9, 0x00, 0x85, 0xf0, 0x66, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.read_mem(0x00f0), 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_ror_carrier_zeropage() {
+    let mut cpu = CPU::new();
+    // SEC
+    // LDA #$ff
+    // STA $f0
+    // ROR $f0
+    // BRK
+    let program = vec![0x38, 0xa9, 0xff, 0x85, 0xf0, 0x66, 0xf0, 0x00];
 
     assert_eq!(cpu.interpret(&program), Ok(()));
 
