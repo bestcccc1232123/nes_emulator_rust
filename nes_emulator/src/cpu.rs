@@ -89,6 +89,13 @@ const OPCODE_LDY_ZEROPAGEX: u8 = 0xb4;
 const OPCODE_LDY_ABSOLUTE: u8 = 0xac;
 const OPCODE_LDY_ABSOLUTEX: u8 = 0xbc;
 
+// LSR
+const OPCODE_LSR_ACCUMULATOR: u8 = 0x4a;
+const OPCODE_LSR_ZEROPAGE: u8 = 0x46;
+const OPCODE_LSR_ZEROPAGEX: u8 = 0x56;
+const OPCODE_LSR_ABSOLUTE: u8 = 0x4e;
+const OPCODE_LSR_ABSOLUTEX: u8 = 0x5e;
+
 // ORA
 const OPCODE_ORA_IMMEDIATE: u8 = 0x09;
 const OPCODE_ORA_ZEROPAGE: u8 = 0x05;
@@ -268,6 +275,13 @@ lazy_static! {
         OpCode::new(OPCODE_LDY_ABSOLUTE, "LDY", 3, 4, AddressingMode::Absolute),
         // Cycles +1 if page crossed.
         OpCode::new(OPCODE_LDY_ABSOLUTEX, "LDY", 3, 4, AddressingMode::AbsoluteX),
+
+        // LSR
+        OpCode::new(OPCODE_LSR_ACCUMULATOR, "LSR", 1, 2, AddressingMode::Accumulator),
+        OpCode::new(OPCODE_LSR_ZEROPAGE, "LSR", 2, 5, AddressingMode::ZeroPage),
+        OpCode::new(OPCODE_LSR_ZEROPAGEX, "LSR", 2, 6, AddressingMode::ZeroPageX),
+        OpCode::new(OPCODE_LSR_ABSOLUTE, "LSR", 3, 6, AddressingMode::Absolute),
+        OpCode::new(OPCODE_LSR_ABSOLUTEX, "LSR", 3, 7, AddressingMode::AbsoluteX),
 
         // ORA
         OpCode::new(OPCODE_ORA_IMMEDIATE, "ORA", 2, 2, AddressingMode::Immediate),
@@ -493,6 +507,12 @@ lazy_static! {
         map.insert(OPCODE_LDY_ZEROPAGEX, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTE, CPU::ldy);
         map.insert(OPCODE_LDY_ABSOLUTEX, CPU::ldy);
+
+        map.insert(OPCODE_LSR_ACCUMULATOR, CPU::lsr);
+        map.insert(OPCODE_LSR_ZEROPAGE, CPU::lsr);
+        map.insert(OPCODE_LSR_ZEROPAGEX, CPU::lsr);
+        map.insert(OPCODE_LSR_ABSOLUTE, CPU::lsr);
+        map.insert(OPCODE_LSR_ABSOLUTEX, CPU::lsr);
 
         map.insert(OPCODE_ORA_IMMEDIATE, CPU::ora);
         map.insert(OPCODE_ORA_ZEROPAGE, CPU::ora);
@@ -793,16 +813,18 @@ impl CPU {
             AddressingMode::Accumulator => {
                 if (self.reg_a & 0b1000_0000) != 0 {
                     self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
                 }
-                self.reg_a = self.reg_a << 1;
-                self.set_zero_flag(self.reg_a);
-                self.set_negative_flag(self.reg_a);
+                self.set_reg_a(self.reg_a << 1);
             }
             _ => {
                 let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
                 let mut val: u8 = self.read_mem(addr);
                 if (val & 0b1000_0000) != 0 {
                     self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
                 }
                 val = val << 1;
                 self.write_mem(addr, val);
@@ -859,6 +881,32 @@ impl CPU {
 
         self.set_negative_flag(self.reg_y);
         self.set_zero_flag(self.reg_y);
+    }
+
+    fn lsr(&mut self, addr_mode: &AddressingMode) {
+        match addr_mode {
+            AddressingMode::Accumulator => {
+                if (self.reg_a & 0b0000_0001) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                self.set_reg_a(self.reg_a >> 1);
+            }
+            _ => {
+                let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
+                let mut val: u8 = self.read_mem(addr);
+                if (val & 0b1000_0001) != 0 {
+                    self.reg_status.insert(Status::C);
+                } else {
+                    self.reg_status.remove(Status::C);
+                }
+                val = val >> 1;
+                self.write_mem(addr, val);
+                self.set_zero_flag(val);
+                self.set_negative_flag(val);
+            }
+        }
     }
 
     fn ora(&mut self, addr_mode: &AddressingMode) {
@@ -1833,4 +1881,72 @@ mod test {
         assert_eq!(cpu.reg_status.contains(Status::N), false);
         assert_eq!(cpu.reg_status.contains(Status::Z), true);
     }
+}
+
+#[test]
+fn test_lsr() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // LSR A
+    // BRK
+    let program = vec![0xa9, 0xff, 0x4a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x7f);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_lsr_zero() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // LSR A
+    // BRK
+    let program = vec![0xa9, 0x00, 0x4a, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_lsr_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$ff
+    // STA $f0
+    // LSR $f0
+    // BRK
+    let program = vec![0xa9, 0xff, 0x85, 0xf0, 0x46, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.read_mem(0x00f0), 0x7f);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_lsr_zero_zeropage() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // STA $f0
+    // LSR $f0
+    // BRK
+    let program = vec![0xa9, 0x00, 0x85, 0xf0, 0x46, 0xf0, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.read_mem(0x00f0), 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
 }
