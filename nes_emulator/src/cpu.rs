@@ -55,6 +55,9 @@ const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 // BCC
 const OPCODE_BCC: u8 = 0x90;
 
+// BCS
+const OPCODE_BCS: u8 = 0xb0;
+
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
@@ -257,7 +260,12 @@ lazy_static! {
         OpCode::new(OPCODE_ASL_ABSOLUTEX, "ASL", 3, 7, AddressingMode::AbsoluteX),
 
         // BCC
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
         OpCode::new(OPCODE_BCC, "BCC", 2, 2, AddressingMode::Relative),
+
+        // BCS
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BCS, "BCS", 2, 2, AddressingMode::Relative),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
@@ -536,6 +544,8 @@ lazy_static! {
         map.insert(OPCODE_ASL_ABSOLUTEX, CPU::asl);
 
         map.insert(OPCODE_BCC, CPU::bcc);
+
+        map.insert(OPCODE_BCS, CPU::bcs);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -934,6 +944,25 @@ impl CPU {
         assert_eq!(*addr_mode, AddressingMode::Relative);
 
         if self.reg_status.contains(Status::C) {
+            return;
+        }
+
+        let relative_addr: i8 = self.read_mem_operand(self.get_operand_address(), addr_mode) as i8;
+        let (new_pc, overflow) = self.calc_new_pc(relative_addr);
+        if overflow {
+            panic!(
+                "branch with a relative address {} that causes program counter {} to overflow",
+                relative_addr, self.pc
+            )
+        }
+
+        self.pc = new_pc;
+    }
+
+    fn bcs(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if !self.reg_status.contains(Status::C) {
             return;
         }
 
@@ -2458,4 +2487,56 @@ fn test_bcc_carrier_clear_backward() {
 
     assert_eq!(cpu.reg_a, 0x00);
     assert_eq!(cpu.reg_status.contains(Status::C), false);
+}
+
+#[test]
+fn test_bcs_carrier_clear() {
+    let mut cpu = CPU::new();
+    // CLC
+    // BCS LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0x18, 0xb0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::C), false);
+}
+
+#[test]
+fn test_bcs_carrier_set() {
+    let mut cpu = CPU::new();
+    // SEC
+    // BCS LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0x38, 0xb0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
+}
+
+#[test]
+fn test_bcs_carrier_set_backward() {
+    let mut cpu = CPU::new();
+    // SEC
+    // BCS LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BCS LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0x38, 0xb0, 0x03, 0xa9, 0xff, 0x00, 0xb0, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::C), true);
 }
