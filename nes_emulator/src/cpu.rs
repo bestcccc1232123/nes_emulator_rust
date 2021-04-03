@@ -55,8 +55,14 @@ const OPCODE_ASL_ABSOLUTEX: u8 = 0x1e;
 // BCC
 const OPCODE_BCC: u8 = 0x90;
 
+// BEQ
+const OPCODE_BEQ: u8 = 0xf0;
+
 // BCS
 const OPCODE_BCS: u8 = 0xb0;
+
+// BNE
+const OPCODE_BNE: u8 = 0xd0;
 
 // BRK
 const OPCODE_BRK: u8 = 0x00;
@@ -267,8 +273,16 @@ lazy_static! {
         // Cycles + 1 if branch succeeds, +2 if to a new page.
         OpCode::new(OPCODE_BCS, "BCS", 2, 2, AddressingMode::Relative),
 
+        // BEQ
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BEQ, "BEQ", 2, 2, AddressingMode::Relative),
+
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
+
+        // BNE
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BNE, "BNE", 2, 2, AddressingMode::Relative),
 
         // CLC
         OpCode::new(OPCODE_CLC, "CLC", 1, 2, AddressingMode::NoneAddressing),
@@ -546,6 +560,10 @@ lazy_static! {
         map.insert(OPCODE_BCC, CPU::bcc);
 
         map.insert(OPCODE_BCS, CPU::bcs);
+
+        map.insert(OPCODE_BEQ, CPU::beq);
+
+        map.insert(OPCODE_BNE, CPU::bne);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -898,6 +916,20 @@ impl CPU {
         (new_pc, overflow)
     }
 
+    fn branch(&mut self) {
+        let relative_addr: i8 =
+            self.read_mem_operand(self.get_operand_address(), &AddressingMode::Relative) as i8;
+        let (new_pc, overflow) = self.calc_new_pc(relative_addr);
+        if overflow {
+            panic!(
+                "branch with a relative address {} that causes program counter {} to overflow",
+                relative_addr, self.pc
+            )
+        }
+
+        self.pc = new_pc;
+    }
+
     fn adc(&mut self, addr_mode: &AddressingMode) {
         let addr = self.read_mem_operand(self.get_operand_address(), addr_mode);
 
@@ -947,16 +979,7 @@ impl CPU {
             return;
         }
 
-        let relative_addr: i8 = self.read_mem_operand(self.get_operand_address(), addr_mode) as i8;
-        let (new_pc, overflow) = self.calc_new_pc(relative_addr);
-        if overflow {
-            panic!(
-                "branch with a relative address {} that causes program counter {} to overflow",
-                relative_addr, self.pc
-            )
-        }
-
-        self.pc = new_pc;
+        self.branch()
     }
 
     fn bcs(&mut self, addr_mode: &AddressingMode) {
@@ -966,16 +989,27 @@ impl CPU {
             return;
         }
 
-        let relative_addr: i8 = self.read_mem_operand(self.get_operand_address(), addr_mode) as i8;
-        let (new_pc, overflow) = self.calc_new_pc(relative_addr);
-        if overflow {
-            panic!(
-                "branch with a relative address {} that causes program counter {} to overflow",
-                relative_addr, self.pc
-            )
+        self.branch();
+    }
+
+    fn beq(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if !self.reg_status.contains(Status::Z) {
+            return;
         }
 
-        self.pc = new_pc;
+        self.branch();
+    }
+
+    fn bne(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if self.reg_status.contains(Status::Z) {
+            return;
+        }
+
+        self.branch();
     }
 
     fn brk(&mut self, _addr_mode: &AddressingMode) {}
@@ -2539,4 +2573,108 @@ fn test_bcs_carrier_set_backward() {
 
     assert_eq!(cpu.reg_a, 0x00);
     assert_eq!(cpu.reg_status.contains(Status::C), true);
+}
+
+#[test]
+fn test_beq_zero_clear() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // BEQ LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x01, 0xf0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_beq_zero_set() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // BEQ LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x00, 0xf0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_beq_zero_set_backward() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // BEQ LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BEQ LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0xa9, 0x00, 0xf0, 0x03, 0xa9, 0xff, 0x00, 0xf0, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x00);
+    assert_eq!(cpu.reg_status.contains(Status::Z), true);
+}
+
+#[test]
+fn test_bne_zero_set() {
+    let mut cpu = CPU::new();
+    // LDA #$00
+    // BNE LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x00, 0xd0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_bne_zero_clear() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // BEQ LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x01, 0xd0, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x01);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
+}
+
+#[test]
+fn test_bne_zero_clear_backward() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // BNE LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BNE LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0xa9, 0x01, 0xd0, 0x03, 0xa9, 0xff, 0x00, 0xd0, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x01);
+    assert_eq!(cpu.reg_status.contains(Status::Z), false);
 }
