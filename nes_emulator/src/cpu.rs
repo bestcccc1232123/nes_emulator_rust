@@ -71,6 +71,9 @@ const OPCODE_BMI: u8 = 0x30;
 // BNE
 const OPCODE_BNE: u8 = 0xd0;
 
+// BPL
+const OPCODE_BPL: u8 = 0x10;
+
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
@@ -295,6 +298,10 @@ lazy_static! {
         // BNE
         // Cycles + 1 if branch succeeds, +2 if to a new page.
         OpCode::new(OPCODE_BNE, "BNE", 2, 2, AddressingMode::Relative),
+
+        // BPL
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BPL, "BPL", 2, 2, AddressingMode::Relative),
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
@@ -584,6 +591,8 @@ lazy_static! {
         map.insert(OPCODE_BMI, CPU::bmi);
 
         map.insert(OPCODE_BNE, CPU::bne);
+
+        map.insert(OPCODE_BPL, CPU::bpl);
 
         map.insert(OPCODE_BRK, CPU::brk);
 
@@ -1059,6 +1068,16 @@ impl CPU {
         assert_eq!(*addr_mode, AddressingMode::Relative);
 
         if self.reg_status.contains(Status::Z) {
+            return;
+        }
+
+        self.branch();
+    }
+
+    fn bpl(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if self.reg_status.contains(Status::N) {
             return;
         }
 
@@ -2822,18 +2841,70 @@ fn test_bmi_negative_clear() {
 fn test_bmi_negative_set_backward() {
     let mut cpu = CPU::new();
     // LDA #$f0
-    // BNE LABEL0
+    // BMI LABEL0
     // LDA #$ff
     // LABEL1: BRK
-    // LABEL0: BNE LABEL1
+    // LABEL0: BMI LABEL1
     // LDA #$ff
     // BRK
     let program = vec![
-        0xa9, 0xf0, 0xd0, 0x03, 0xa9, 0xff, 0x00, 0xd0, 0xfd, 0xa9, 0xff, 0x00,
+        0xa9, 0xf0, 0x30, 0x03, 0xa9, 0xff, 0x00, 0x30, 0xfd, 0xa9, 0xff, 0x00,
     ];
 
     assert_eq!(cpu.interpret(&program), Ok(()));
 
     assert_eq!(cpu.reg_a, 0xf0);
     assert_eq!(cpu.reg_status.contains(Status::N), true);
+}
+
+#[test]
+fn test_bpl_negative_clear() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // BPL LABEL
+    // LDA #$02
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x01, 0x10, 0x03, 0xa9, 0x02, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x01);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
+}
+
+#[test]
+fn test_bpl_negative_set() {
+    let mut cpu = CPU::new();
+    // LDA #$f0
+    // BPL LABEL
+    // LDA #$ff
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0xf0, 0x10, 0x03, 0xa9, 0xff, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0xff);
+    assert_eq!(cpu.reg_status.contains(Status::N), true);
+}
+
+#[test]
+fn test_bpl_negative_set_backward() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // BPL LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BPL LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0xa9, 0x01, 0x10, 0x03, 0xa9, 0xff, 0x00, 0x10, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x01);
+    assert_eq!(cpu.reg_status.contains(Status::N), false);
 }
