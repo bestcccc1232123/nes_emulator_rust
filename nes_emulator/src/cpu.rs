@@ -77,6 +77,12 @@ const OPCODE_BPL: u8 = 0x10;
 // BRK
 const OPCODE_BRK: u8 = 0x00;
 
+// BVC
+const OPCODE_BVC: u8 = 0x50;
+
+// BVS
+const OPCODE_BVS: u8 = 0x70;
+
 // CLC
 const OPCODE_CLC: u8 = 0x18;
 
@@ -305,6 +311,14 @@ lazy_static! {
 
         // BRK
         OpCode::new(OPCODE_BRK, "BRK", 1, 7, AddressingMode::NoneAddressing),
+
+        // BVC
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BVC, "BVC", 2, 2, AddressingMode::Relative),
+
+        // BVS
+        // Cycles + 1 if branch succeeds, +2 if to a new page.
+        OpCode::new(OPCODE_BVS, "BPL", 2, 2, AddressingMode::Relative),
 
         // CLC
         OpCode::new(OPCODE_CLC, "CLC", 1, 2, AddressingMode::NoneAddressing),
@@ -595,6 +609,10 @@ lazy_static! {
         map.insert(OPCODE_BPL, CPU::bpl);
 
         map.insert(OPCODE_BRK, CPU::brk);
+
+        map.insert(OPCODE_BVC, CPU::bvc);
+
+        map.insert(OPCODE_BVS, CPU::bvs);
 
         map.insert(OPCODE_CLC, CPU::clc);
         map.insert(OPCODE_CLD, CPU::cld);
@@ -1085,6 +1103,26 @@ impl CPU {
     }
 
     fn brk(&mut self, _addr_mode: &AddressingMode) {}
+
+    fn bvc(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if self.reg_status.contains(Status::V) {
+            return;
+        }
+
+        self.branch();
+    }
+
+    fn bvs(&mut self, addr_mode: &AddressingMode) {
+        assert_eq!(*addr_mode, AddressingMode::Relative);
+
+        if !self.reg_status.contains(Status::V) {
+            return;
+        }
+
+        self.branch();
+    }
 
     fn clc(&mut self, _addr_mode: &AddressingMode) {
         self.reg_status.remove(Status::C);
@@ -2907,4 +2945,114 @@ fn test_bpl_negative_set_backward() {
 
     assert_eq!(cpu.reg_a, 0x01);
     assert_eq!(cpu.reg_status.contains(Status::N), false);
+}
+
+#[test]
+fn test_bvc_overflow_clear() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // ADC #$01
+    // BVC LABEL
+    // LDA #$03
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x01, 0x69, 0x01, 0x50, 0x03, 0xa9, 0x03, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x02);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
+}
+
+#[test]
+fn test_bvc_overflow_set() {
+    let mut cpu = CPU::new();
+    // LDA #$40
+    // ADC #$40
+    // BVC LABEL
+    // LDA #$03
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x40, 0x69, 0x40, 0x50, 0x03, 0xa9, 0x03, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x03);
+    assert_eq!(cpu.reg_status.contains(Status::V), true);
+}
+
+#[test]
+fn test_bvc_overflow_clear_backward() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // ADC #$01
+    // BVC LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BVC LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0xa9, 0x01, 0x69, 0x01, 0x50, 0x03, 0xa9, 0xff, 0x00, 0x50, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x02);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
+}
+
+#[test]
+fn test_bvs_overflow_set() {
+    let mut cpu = CPU::new();
+    // LDA #$40
+    // ADC #$40
+    // BVS LABEL
+    // LDA #$03
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x40, 0x69, 0x40, 0x70, 0x03, 0xa9, 0x03, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x80);
+    assert_eq!(cpu.reg_status.contains(Status::V), true);
+}
+
+#[test]
+fn test_bvs_overflow_clear() {
+    let mut cpu = CPU::new();
+    // LDA #$01
+    // ADC #$01
+    // BVS LABEL
+    // LDA #$03
+    // BRK
+    // LABEL: BRK
+    let program = vec![0xa9, 0x01, 0x69, 0x01, 0x70, 0x03, 0xa9, 0x03, 0x00, 0x00];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x03);
+    assert_eq!(cpu.reg_status.contains(Status::V), false);
+}
+
+#[test]
+fn test_bvs_overflow_set_backward() {
+    let mut cpu = CPU::new();
+    // LDA #$40
+    // ADC #$40
+    // BVS LABEL0
+    // LDA #$ff
+    // LABEL1: BRK
+    // LABEL0: BVS LABEL1
+    // LDA #$ff
+    // BRK
+    let program = vec![
+        0xa9, 0x40, 0x69, 0x40, 0x70, 0x03, 0xa9, 0xff, 0x00, 0x70, 0xfd, 0xa9, 0xff, 0x00,
+    ];
+
+    assert_eq!(cpu.interpret(&program), Ok(()));
+
+    assert_eq!(cpu.reg_a, 0x80);
+    assert_eq!(cpu.reg_status.contains(Status::V), true);
 }
